@@ -1,0 +1,14 @@
+{
+  "version": "0.24.3",
+  "date": "2026-11-13",
+  "notes": [
+    "Тема Project: визуализаторы стали чувствительнее — на громких треках больше не стоят на полную, а двигаются в ритм"
+  ],
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.24.3/pulse-app-0.24.3.zip",
+  "sha256": "b16f47a9f577ad82cdfb899a10a65c411d4f5e719308973a340e6d23b122b996",
+  "size": 998219,
+  "minElectron": "33.2.1",
+  "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
+  "online": "https://pulse-online.pulsmusic.workers.dev",
+  "sig": "O/Wi3LNif+xLiIiwIEfI/s4alNKY8ZNP5582FqGoLS/NoR0ZAI0/Xf/obarCkPtfsJYPEkKvy2xoUmL60ep3Bg=="
+}
