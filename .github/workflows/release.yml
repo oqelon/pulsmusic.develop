@@ -8,6 +8,7 @@
 # уже после релиза и прикрепляются к нему сами (компьютеров с Mac у GitHub бывает мало — раньше из-за очереди ждали все): подпись проверяется, программа для Apple M
 # запускается в режиме самопроверки. К релизу прикрепляются Pulse-Mac-Apple-M.zip, Pulse-Mac-Intel.zip и mac.json
 # (адреса и SHA-256 — по нему программа на Mac обновляет себя целиком, когда меняется движок).
+# Подписи: latest.json подписан заранее (tools/make-update.py), mac.json — после сборки (tools/sign-mac.py); ключ — только у разработчика.
 name: Выпуск обновления
 on:
   push:
@@ -52,6 +53,9 @@ jobs:
           assert m["size"] == len(z), "размер не совпадает"
           print("Файлы в порядке:", v, len(z), "байт")
           PY
+          # подпись разработчика (Ed25519, ключ — только у разработчика): неподписанное программа не примет
+          mkdir -p /tmp/us && unzip -o -q "$DIR/pulse-app-$VER.zip" updsign.js -d /tmp/us
+          node -e "const T=require('/tmp/us/updsign.js');const m=require(process.argv[1]);if(!T.verifyPkg(m)){console.error('latest.json не подписан ключом разработчика — выпуск остановлен');process.exit(1)}console.log('Подпись в порядке')" "$PWD/$DIR/latest.json"
 
   mac:
     needs: [ver, release]
@@ -89,6 +93,9 @@ jobs:
         run: |
           VER="${{ needs.ver.outputs.ver }}"
           if [ -f out/mac.json ]; then gh release upload "v$VER" out/Pulse-Mac-Apple-M.zip out/Pulse-Mac-Intel.zip out/mac.json -R "$GITHUB_REPOSITORY" --clobber; fi
+          # mac.json выкладывается без подписи: подписывает разработчик своим ключом (tools/sign-mac.py <версия>),
+          # до этого программа на Mac берёт только обычное обновление, а не Pulse.app целиком
+          echo "mac.json ждёт подписи: python3 tools/sign-mac.py $VER"
 
   release:
     needs: ver
