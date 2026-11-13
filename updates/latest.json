@@ -1,14 +1,16 @@
 {
-  "version": "0.23.1",
+  "version": "0.24.0",
   "date": "2026-11-13",
   "notes": [
-    "Проверочное обновление: проверка автоматической установки обновлений"
+    "Новая тема Project: моноширинный шрифт, капсулы вместо бокового меню, мини-плеер и главная с большими карточками",
+    "Все темы собраны в одном месте: Профиль → Оформление → Тема",
+    "Исправлено: панель «Далее» на странице «Мой пульс» пряталась под боковым меню"
   ],
-  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.23.1/pulse-app-0.23.1.zip",
-  "sha256": "0b46fcc2516236d51c868b236b67553a9639bb00782b5740c5208b91105d3266",
-  "size": 896238,
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.24.0/pulse-app-0.24.0.zip",
+  "sha256": "9979b7b83785ca56f534d040a48d9bf9b3c2b1322ca08252de2b9c7e8ac108d3",
+  "size": 993835,
   "minElectron": "33.2.1",
   "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
   "online": "https://pulse-online.pulsmusic.workers.dev",
-  "sig": "6h8J+wmsiLE1gGcnaorhH/eiS2Jf2pvhQoHPnNCODmjRmlWoMYE0kl05X8ne7BXaZFL+yzV0ir95HXP1ll4mBQ=="
+  "sig": "mFPu2fDEbOsWtpGtGuHVzVpgUDrEJyrH9iF5OMf06PGyB493ndAStvft48MTXh0HllZrD5vuoh7giqbVsmv5AA=="
 }
