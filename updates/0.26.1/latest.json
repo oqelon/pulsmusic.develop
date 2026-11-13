@@ -1,0 +1,14 @@
+{
+  "version": "0.26.1",
+  "date": "2026-11-14",
+  "notes": [
+    "Тема Project: исправлена ошибка, из-за которой обложка перерисовывалась при наведении"
+  ],
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.26.1/pulse-app-0.26.1.zip",
+  "sha256": "dcb802c25bfad426a0ae4d6f526ead54ac1b64d4cb26f493d8674459de10c574",
+  "size": 1003297,
+  "minElectron": "33.2.1",
+  "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
+  "online": "https://pulse-online.pulsmusic.workers.dev",
+  "sig": "Pf2/YtaGeafvZlX8mfF36vpJxuKn1kqFQvXSZO1TZOW1NMNgaOAzyj2tG95iViw9yU18VcCwSswHkm100klyBg=="
+}
