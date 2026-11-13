@@ -1,0 +1,15 @@
+{
+  "version": "0.25.1",
+  "date": "2026-11-14",
+  "notes": [
+    "Тема Project: рамка занимает всё окно, фон за ней убран",
+    "Тема Project: левая колонка стала шире, значки и кнопки — крупнее"
+  ],
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.25.1/pulse-app-0.25.1.zip",
+  "sha256": "feb7278be7cdb762e16531c43f3b546ee8fd4d27c9a2bd11e282a52319dc81a0",
+  "size": 999534,
+  "minElectron": "33.2.1",
+  "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
+  "online": "https://pulse-online.pulsmusic.workers.dev",
+  "sig": "8VpDeRkaE5o4lVcW3c8UP4sjrXCQdSZGLxzL0e/oMyreIhsT8861gi0mD70qg6rzS/uedpLNQlI0No95NxfpBA=="
+}
