@@ -1,14 +1,16 @@
 {
-  "version": "0.24.4",
-  "date": "2026-11-13",
+  "version": "0.25.0",
+  "date": "2026-11-14",
   "notes": [
-    "Тема Project: визуализаторы переделаны — программа сама определяет темп трека и пульсирует точно в такт ударам, на любой громкости"
+    "Тема Project: интерфейс собран в единую рамку — левая колонка стала уже, разделы обозначены линейными значками",
+    "Тема Project: выровнены отступы, скругления и размеры кнопок; мини-плеер стал компактнее",
+    "Улучшена читаемость мелких подписей, убраны лишние декоративные эффекты"
   ],
-  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.24.4/pulse-app-0.24.4.zip",
-  "sha256": "ba25523252529ec4956f71f98e3c1afaa8e58b7dfda21c90818acd73c67a200a",
-  "size": 999118,
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.25.0/pulse-app-0.25.0.zip",
+  "sha256": "9d80c5d488440547b92bbb311c15e9abc44d7c34caebb4e845c7744c4198c2cb",
+  "size": 999601,
   "minElectron": "33.2.1",
   "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
   "online": "https://pulse-online.pulsmusic.workers.dev",
-  "sig": "pvJVQTGZaHheQIadbC9M0+fmU69994wcsz78Tvvgw9XaVGxhDoc7lyir4aIxcPbYKXDbpq1rJlm2aJelty0QAA=="
+  "sig": "tcndpTtd9iJaHucoRJD4M9Br5rQ4r9djwjSkm2haxo2S8lEtx2Pl9r7VDtASiWeL4gsR8+S0drKDXiGqO12/Bw=="
 }
