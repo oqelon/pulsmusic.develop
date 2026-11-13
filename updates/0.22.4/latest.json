@@ -1,0 +1,14 @@
+{
+  "version": "0.22.4",
+  "date": "2026-11-13",
+  "notes": [
+    "Обновления теперь приходят из нового репозитория",
+    "Улучшена стабильность проверки обновлений"
+  ],
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.22.4/pulse-app-0.22.4.zip",
+  "sha256": "43cb729fe46f6339c7608a7f8f7625a2792674e876771be7fc0fc1421eabfc91",
+  "size": 891629,
+  "minElectron": "33.2.1",
+  "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
+  "online": "https://pulse-online.pulsmusic.workers.dev"
+}
