@@ -1,14 +1,16 @@
 {
-  "version": "0.22.4",
+  "version": "0.23.0",
   "date": "2026-11-13",
   "notes": [
-    "Обновления теперь приходят из нового репозитория",
-    "Улучшена стабильность проверки обновлений"
+    "Обновления скачиваются в фоне и устанавливаются при следующем запуске; перезапустить можно сразу из уведомления",
+    "Обновления проверяются по цифровой подписи разработчика",
+    "Добавлен переключатель «Скачивать обновления сами» в разделе «Обновления»"
   ],
-  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.22.4/pulse-app-0.22.4.zip",
-  "sha256": "43cb729fe46f6339c7608a7f8f7625a2792674e876771be7fc0fc1421eabfc91",
-  "size": 891629,
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.23.0/pulse-app-0.23.0.zip",
+  "sha256": "b2e98556495720558e383734db6d3b1946c3b6e348f19eba17ab7a6985fc2b42",
+  "size": 896239,
   "minElectron": "33.2.1",
   "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
-  "online": "https://pulse-online.pulsmusic.workers.dev"
+  "online": "https://pulse-online.pulsmusic.workers.dev",
+  "sig": "ErW+LfIBpaak95X9LXWCpmkJACVNmvD9A1Lz3d+CGb3JsQui7mzc0hxQ+P9Hod0R+6udZqbDyrRV8LYWFeDFAQ=="
 }
