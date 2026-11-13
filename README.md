@@ -27,7 +27,9 @@
 2. `python3 tools/make-update.py "Что нового 1" "Что нового 2"` — пакет и подписанный `latest.json` в `release-update/`.
 3. Положить оба файла в `updates/<версия>/` (и `latest.json` в `updates/`), отправить в `main`. GitHub Actions
    проверит подпись, соберёт установщик Windows и Pulse.app для Mac и опубликует релиз `v<версия>`.
-4. Когда к релизу прикрепятся сборки для Mac: `python3 tools/sign-mac.py <версия>` — подписывает `mac.json`.
+4. Когда к релизу прикрепятся сборки для Mac: `python3 tools/sign-mac.py <версия> --save .` — подписывает `mac.json`
+   и кладёт его в `updates/<версия>/`; после отправки в `main` workflow «Подпись сборок для Mac» сверит подпись
+   и заменит им файл в релизе.
 5. Проверка на настоящем Mac: workflow «Проверка обновлений на Mac» (`mac/test/run.sh`).
 
 ## Установщик (самый простой способ)

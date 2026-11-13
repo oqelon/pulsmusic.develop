@@ -7,6 +7,9 @@
 и SHA-256 каждого архива, подписывает их и выкладывает подписанный mac.json обратно в релиз.
 
   python3 tools/sign-mac.py 0.23.0                 — релиз v0.23.0 репозитория (нужен gh с доступом к репозиторию)
+  python3 tools/sign-mac.py 0.23.0 --save <репо>   — не выкладывать самому, а положить в <репо>/updates/0.23.0/mac.json:
+                                                     после отправки в main его прикрепит к релизу GitHub Actions
+                                                     (workflow «Подпись сборок для Mac» сверяет подпись)
   python3 tools/sign-mac.py --dir <папка> <версия>  — mac.json и архивы в папке (для проверки, без GitHub)
 
 Ключ: PULSE_SIGN_KEY=<путь к .pem> или ../pulse-update-keys/update-ed25519.pem рядом с папкой проекта.
@@ -54,6 +57,7 @@ def main():
     if not args:
         sys.exit(__doc__)
     ver = args[0]; tag = "v" + ver
+    save = args[args.index("--save") + 1] if "--save" in args else None
     rel = json.loads(gh("api", f"repos/{REPO}/releases/tags/{tag}"))
     assets = {a["name"]: a["id"] for a in rel["assets"]}
     need = ["mac.json", *NAMES.values()]
@@ -65,6 +69,11 @@ def main():
             data = gh("api", "-H", "Accept: application/octet-stream", f"repos/{REPO}/releases/assets/{assets[n]}")
             open(os.path.join(d, n), "wb").write(data)
         sign_dir(d, ver, k)
+        if save:
+            dst = os.path.join(save, "updates", ver, "mac.json"); os.makedirs(os.path.dirname(dst), exist_ok=True)
+            open(dst, "wb").write(open(os.path.join(d, "mac.json"), "rb").read())
+            print(f"Готово: подписанный mac.json — {dst}; отправьте в main, GitHub Actions прикрепит его к {tag}")
+            return
         subprocess.run(["gh", "release", "upload", tag, os.path.join(d, "mac.json"), "-R", REPO, "--clobber"], check=True)
     print(f"Готово: подписанный mac.json выложен в релиз {tag}")
 

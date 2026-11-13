@@ -1,0 +1,38 @@
+# Подпись сборок для Mac: разработчик подписывает mac.json своим ключом (tools/sign-mac.py <версия> --save .)
+# и кладёт его в updates/<версия>/mac.json. Здесь подпись сверяется открытым ключом из пакета этой версии
+# (updsign.js) и с архивами в релизе, после чего подписанный mac.json заменяет неподписанный в релизе v<версия>.
+# Закрытого ключа на GitHub нет — этот workflow только переносит уже подписанный файл.
+name: Подпись сборок для Mac
+on:
+  push:
+    branches: [main]
+    paths: ['updates/*/mac.json']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  sign:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Проверить подпись и прикрепить к релизу
+        run: |
+          set -e
+          for f in updates/*/mac.json; do
+            VER=$(basename "$(dirname "$f")"); Z="updates/$VER/pulse-app-$VER.zip"
+            gh release view "v$VER" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || { echo "нет релиза v$VER — пропускаю"; continue; }
+            rm -rf /tmp/us /tmp/rel && mkdir -p /tmp/us /tmp/rel && unzip -o -q "$Z" updsign.js -d /tmp/us
+            gh release download "v$VER" -R "$GITHUB_REPOSITORY" -p mac.json -D /tmp/rel
+            node -e '
+              const T = require("/tmp/us/updsign.js"), m = require(process.argv[1]), r = require("/tmp/rel/mac.json"), v = process.argv[2];
+              if (m.version !== v) { console.error("mac.json другой версии"); process.exit(1); }
+              for (const a of ["arm64", "x64"]) {
+                if (!T.verifyMac(v, a, m[a])) { console.error("подпись " + a + " не сошлась"); process.exit(1); }
+                if (m[a].sha256 !== r[a].sha256 || m[a].size !== r[a].size || m[a].url !== r[a].url) { console.error(a + ": не совпадает со сборкой в релизе"); process.exit(1); }
+              }
+              if (r.arm64.sig && r.x64.sig) { console.log("в релизе уже подписан"); process.exit(3); }
+              console.log("подпись в порядке: " + v);
+            ' "$PWD/$f" "$VER" && gh release upload "v$VER" "$f" -R "$GITHUB_REPOSITORY" --clobber || { c=$?; [ $c = 3 ] || exit $c; }
+          done
