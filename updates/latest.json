@@ -1,15 +1,17 @@
 {
-  "version": "0.24.1",
+  "version": "0.24.2",
   "date": "2026-11-13",
   "notes": [
-    "Тема Project: новые обложки «Любимых треков», «Недавних», «На компьютере», пустых плейлистов и подборок «Собрано для вас» — знаки из точек",
-    "Исправлено: в разделе «Тема» не показывались картинки тем"
+    "Тема Project: визуализатор в мини-плеере (точечный диск) и в большом плеере (линия точек) — двигаются под звук трека",
+    "Тема Project: обложки подборок в стиле «Код», качество звука в мини-плеере, левая колонка стала уже, стекла больше нет",
+    "Исправлено: подсказки у значков левой колонки съезжали",
+    "Исправлено: ссылки «О программе», «Оформление» и другие открывали в профиле не ту вкладку"
   ],
-  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.24.1/pulse-app-0.24.1.zip",
-  "sha256": "9e2e2d0b3a770f7342aa8dd6946d8ce64913e7c6d8c778bd336d0a88ffeb11af",
-  "size": 995219,
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.24.2/pulse-app-0.24.2.zip",
+  "sha256": "ef5c5684875d286db7fae1e2af15f4d800c55a6dd5ec99bb888e48472e0a469c",
+  "size": 998051,
   "minElectron": "33.2.1",
   "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
   "online": "https://pulse-online.pulsmusic.workers.dev",
-  "sig": "b0d9LB56EdMXvQRN8ZJ8BB9CHnkJ2+5ZnzaFODUnimQNF9Zvqdx5KqkReI5lmmvWfZrpF9CLQxVHYBjjutSoBg=="
+  "sig": "juAxKDWodAS6REIEAnpCsKL5OL4/DVSkwPqPxH8Zm6cmMOa+fUp7BCvt9zoxYVM3c6UQKDpd3hqH7vEUoU4YAw=="
 }
