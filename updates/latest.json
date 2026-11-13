@@ -1,16 +1,15 @@
 {
-  "version": "0.24.0",
+  "version": "0.24.1",
   "date": "2026-11-13",
   "notes": [
-    "Новая тема Project: моноширинный шрифт, капсулы вместо бокового меню, мини-плеер и главная с большими карточками",
-    "Все темы собраны в одном месте: Профиль → Оформление → Тема",
-    "Исправлено: панель «Далее» на странице «Мой пульс» пряталась под боковым меню"
+    "Тема Project: новые обложки «Любимых треков», «Недавних», «На компьютере», пустых плейлистов и подборок «Собрано для вас» — знаки из точек",
+    "Исправлено: в разделе «Тема» не показывались картинки тем"
   ],
-  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.24.0/pulse-app-0.24.0.zip",
-  "sha256": "9979b7b83785ca56f534d040a48d9bf9b3c2b1322ca08252de2b9c7e8ac108d3",
-  "size": 993835,
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.24.1/pulse-app-0.24.1.zip",
+  "sha256": "9e2e2d0b3a770f7342aa8dd6946d8ce64913e7c6d8c778bd336d0a88ffeb11af",
+  "size": 995219,
   "minElectron": "33.2.1",
   "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
   "online": "https://pulse-online.pulsmusic.workers.dev",
-  "sig": "mFPu2fDEbOsWtpGtGuHVzVpgUDrEJyrH9iF5OMf06PGyB493ndAStvft48MTXh0HllZrD5vuoh7giqbVsmv5AA=="
+  "sig": "b0d9LB56EdMXvQRN8ZJ8BB9CHnkJ2+5ZnzaFODUnimQNF9Zvqdx5KqkReI5lmmvWfZrpF9CLQxVHYBjjutSoBg=="
 }
