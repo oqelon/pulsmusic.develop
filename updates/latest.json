@@ -1,15 +1,16 @@
 {
-  "version": "0.25.1",
+  "version": "0.26.0",
   "date": "2026-11-14",
   "notes": [
-    "Тема Project: рамка занимает всё окно, фон за ней убран",
-    "Тема Project: левая колонка стала шире, значки и кнопки — крупнее"
+    "Тема Project: обложки альбомов, треков и фото исполнителей отображаются символами — буквами названия и знаками",
+    "Тема Project: фон большого плеера — пейзаж из символов, который движется в такт музыке",
+    "Тема Project: новая анимация запуска — звезда собирается из символов"
   ],
-  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.25.1/pulse-app-0.25.1.zip",
-  "sha256": "feb7278be7cdb762e16531c43f3b546ee8fd4d27c9a2bd11e282a52319dc81a0",
-  "size": 999534,
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.26.0/pulse-app-0.26.0.zip",
+  "sha256": "861b07531d1450226fd7bac8440d544dd72d50f9eafa0d8912c21bb3260fa14a",
+  "size": 1003440,
   "minElectron": "33.2.1",
   "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
   "online": "https://pulse-online.pulsmusic.workers.dev",
-  "sig": "8VpDeRkaE5o4lVcW3c8UP4sjrXCQdSZGLxzL0e/oMyreIhsT8861gi0mD70qg6rzS/uedpLNQlI0No95NxfpBA=="
+  "sig": "c2kai8kQZswaDlu3SXW8qcE9NLY9x9FXC+/rKYm27Et0D1hVHMLUV/dayVwSp/eZVPGDUV2h6tzxM7m86PctCA=="
 }
