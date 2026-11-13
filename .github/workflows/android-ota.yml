@@ -1,0 +1,63 @@
+# Обновление Android-приложения «по воздуху»: правки интерфейса (mobile/src, App.tsx, assets) собираются в JS-пакет
+# за пару минут и выкладываются в релиз android-ota. Телефон узнаёт о нём у сервера pulse-online (Cloudflare)
+# и скачивает файлы отсюда. APK не пересобирается. Если в том же коммите менялась сборка (mobile/VERSION) —
+# ничего не делаем: всё войдёт в новый APK (android.yml).
+name: Android (по воздуху)
+on:
+  push:
+    branches: [main]
+    paths: ['mobile/src/**', 'mobile/App.tsx', 'mobile/assets/**', 'mobile/NOTES', '.github/workflows/android-ota.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency: android-ota
+jobs:
+  ota:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      EXPO_NO_TELEMETRY: '1'
+      CI: '1'
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Это правка интерфейса, а не новая сборка?
+        id: go
+        run: |
+          if [ "${{ github.event_name }}" = push ] && git diff --name-only HEAD~1 HEAD | grep -qx 'mobile/VERSION'; then echo "Меняется сборка — обновление войдёт в новый APK"; echo "run=0" >> "$GITHUB_OUTPUT"; else echo "run=1" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/setup-node@v4
+        if: steps.go.outputs.run == '1'
+        with:
+          node-version: '20'
+      - uses: actions/cache@v4
+        if: steps.go.outputs.run == '1'
+        with:
+          path: ~/.npm
+          key: ota-npm-${{ github.run_id }}
+          restore-keys: ota-npm-
+      - name: Проект с теми же библиотеками, что в APK
+        if: steps.go.outputs.run == '1'
+        run: |
+          B=$(sed -n 2p mobile/VERSION | tr -d '[:space:]'); V=$(head -1 mobile/VERSION | tr -d '[:space:]')
+          echo "B=$B" >> "$GITHUB_ENV"; echo "V=$V" >> "$GITHUB_ENV"
+          npx --yes create-expo-app@latest app --template blank-typescript@sdk-54 --no-install
+          cd app && rm -f App.tsx && cp -r ../mobile/App.tsx ../mobile/src ../mobile/assets .
+          node ../mobile/merge-app-json.js app.json ../mobile/app.json ../mobile/VERSION
+          gh release download android-ota -R "$GITHUB_REPOSITORY" -p "deps-$B.tgz" -D .. || { echo "Нет зависимостей для сборки $B — сначала нужен APK этой сборки"; exit 1; }
+          tar xzf "../deps-$B.tgz"
+          npm ci --no-audit --no-fund
+      - name: Пакет обновления
+        if: steps.go.outputs.run == '1'
+        run: |
+          cd app && npx expo export --platform android --output-dir dist
+          node ../mobile/ota-manifest.js dist "$B" "$V" ../mobile/NOTES ../ota-out
+      - name: Выкладываю (файлы — по их хэшу, манифест — последним)
+        if: steps.go.outputs.run == '1'
+        run: |
+          have=$(gh release view android-ota -R "$GITHUB_REPOSITORY" --json assets -q '.assets[].name')
+          F=(); for f in ota-out/*; do n=$(basename "$f"); case "$n" in manifest-*) continue;; esac; echo "$have" | grep -qx "$n" || F+=("$f"); done
+          [ ${#F[@]} -gt 0 ] && gh release upload android-ota "${F[@]}" -R "$GITHUB_REPOSITORY"
+          gh release upload android-ota ota-out/manifest-*.json -R "$GITHUB_REPOSITORY" --clobber
+          echo "Новых файлов: ${#F[@]}"

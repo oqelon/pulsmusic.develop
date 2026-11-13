@@ -1,0 +1,116 @@
+# Android-версия «Пульса» (mobile/ — Expo, React Native). Собирает APK (только когда меняется сборка: mobile/VERSION,
+# app.json — то есть «движок»); правки интерфейса уходят обновлением «по воздуху» (android-ota.yml).
+# Эмулятор и версия для x86_64 — только если в сообщении коммита есть [эмулятор].
+# Готовая сборка выкладывается в служебный пред-релиз android-build (подписана временным ключом CI);
+# итоговый APK подписывается постоянным ключом разработчика и выкладывается в релиз «android» отдельно
+# (ключ в репозиторий не кладётся). Обновлений программы для Windows это не касается.
+name: Android (APK)
+on:
+  push:
+    branches: [main]
+    paths: ['mobile/VERSION', 'mobile/app.json', 'mobile/merge-app-json.js', '.github/workflows/android.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency: android
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      EXPO_NO_TELEMETRY: '1'
+      CI: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Кэш npm и Gradle (между сборками)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.npm
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: android-deps-${{ hashFiles('.github/workflows/android.yml') }}-${{ github.run_id }}
+          restore-keys: |
+            android-deps-${{ hashFiles('.github/workflows/android.yml') }}-
+            android-deps-
+      - name: Проект Expo (SDK 54)
+        run: |
+          npx --yes create-expo-app@latest app --template blank-typescript@sdk-54 --no-install
+          cp app/app.json app/app.template.json
+          cd app && rm -f App.tsx && cp -r ../mobile/App.tsx ../mobile/src ../mobile/assets .
+          node ../mobile/merge-app-json.js app.json ../mobile/app.json ../mobile/VERSION
+          npm install --no-audit --no-fund
+          npx expo install expo-audio expo-blur expo-haptics react-native-reanimated react-native-worklets react-native-safe-area-context @react-native-async-storage/async-storage @expo/vector-icons expo-image-picker expo-linear-gradient react-native-gesture-handler expo-file-system expo-intent-launcher expo-splash-screen react-native-svg expo-image @react-native-masked-view/masked-view expo-updates
+          npm install --no-audit --no-fund jpeg-js
+          npx expo install --fix || true
+          npm dedupe --no-audit --no-fund || true
+          # свои доработки нативного плеера: кнопки «назад/вперёд» в шторке, плеер не засыпает при выключенном экране
+          node ../mobile/patch-expo-audio.js .
+          npm ls --depth=0 || true
+          npm ls expo-modules-autolinking || true
+          npx expo-modules-autolinking resolve --platform android --json > autolink.json 2>/dev/null || true
+          node -e "const j=require('./autolink.json'); for (const m of j.modules||[]) console.log(m.packageName, m.packageVersion, JSON.stringify((m.projects||[]).map(p=>p.publication||null)))" || true
+          cat app.json
+      - name: Яндекс отсюда отвечает?
+        run: |
+          curl -s -m 15 -H 'X-Yandex-Music-Client: YandexMusicAndroid/24023621' https://api.music.yandex.net/landing3/chart/russia | head -c 300; echo
+          curl -s -m 15 -H 'X-Yandex-Music-Client: YandexMusicAndroid/24023621' 'https://api.music.yandex.net/search?text=kino&type=track&page=0' | head -c 300; echo
+      - name: Проверка типов (для журнала)
+        run: cd app && (npx tsc --noEmit 2>&1 | head -80) || true
+      - name: Сборка APK
+        env:
+          MSG: ${{ github.event.head_commit.message }}
+        run: |
+          cd app && npx expo prebuild -p android --no-install
+          # значок «Пульса» для уведомления плеера (его берёт доработанный expo-audio)
+          mkdir -p android/app/src/main/res/drawable && cp ../mobile/assets/notif/ic_pulse_notif.xml android/app/src/main/res/drawable/ && mkdir -p android/app/src/main/res/raw && cp ../mobile/assets/notif/keep.xml android/app/src/main/res/raw/pulse_keep.xml
+          # больше памяти Gradle и Kotlin: иначе KSP (expo-updates) падает с «OutOfMemoryError: Metaspace» и сборка зависает
+          sed -i '/^org.gradle.jvmargs/d' android/gradle.properties
+          printf '\norg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=2g -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8\nkotlin.daemon.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=1g\n' >> android/gradle.properties
+          A=arm64-v8a,armeabi-v7a; case "$MSG" in *'[эмулятор]'*) A=$A,x86_64;; esac
+          cd android && ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=$A 2>&1 | tee ../../gradle.log; test ${PIPESTATUS[0]} -eq 0
+          if grep -a 'expo-audio' ../../gradle.log | grep -q '📦'; then echo 'expo-audio взят готовым (без доработок) — стоп'; exit 1; fi
+          ls -la app/build/outputs/apk/release/
+      - name: KVM для эмулятора
+        if: contains(github.event.head_commit.message, '[эмулятор]')
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+      - name: Проверка в эмуляторе Android 14
+        if: contains(github.event.head_commit.message, '[эмулятор]')
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: bash mobile/ci-smoke.sh app/android/app/build/outputs/apk/release/app-release.apk smoke
+      - name: Публикация сборки
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V=$(head -1 mobile/VERSION | tr -d '[:space:]')
+          F=()
+          [ -f app/android/app/build/outputs/apk/release/app-release.apk ] && cp app/android/app/build/outputs/apk/release/app-release.apk "pulse-android-$V-ci.apk" && F+=("pulse-android-$V-ci.apk")
+          for x in smoke/*; do [ -f "$x" ] && F+=("$x"); done
+          (cd app && npx tsc --noEmit > ../tsc.txt 2>&1 || true); F+=(tsc.txt)
+          gh release view android-build -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create android-build -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Android — служебная сборка" --notes "Сборка CI для проверки. Итоговый APK — в релизе android." --prerelease --latest=false
+          gh release upload android-build "${F[@]}" -R "$GITHUB_REPOSITORY" --clobber
+      - name: Зависимости этой сборки — для обновлений «по воздуху»
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          B=$(sed -n 2p mobile/VERSION | tr -d '[:space:]')
+          tar czf "deps-$B.tgz" -C app package.json package-lock.json
+          gh release view android-ota -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create android-ota -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Android — обновления по воздуху" --notes "Служебный релиз: файлы обновлений интерфейса без установки APK." --prerelease --latest=false
+          gh release upload android-ota "deps-$B.tgz" -R "$GITHUB_REPOSITORY" --clobber

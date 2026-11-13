@@ -1,0 +1,148 @@
+# Выпуск обновления «Пульса» для Windows и Mac.
+# Срабатывает, когда в updates/ появляется новая версия (папка updates/<версия>/ с latest.json и pulse-app-<версия>.zip):
+# находит самую новую версию, для которой ещё нет релиза, проверяет файлы (версия, размер, SHA-256) и создаёт релиз v<версия>.
+# К релизу прикрепляются latest.json и пакет (их скачивает кнопка «Проверить обновления») и установщик.
+# Установщик собирается здесь же из installer/ (Go) — с Electron с GitHub (проверка SHA-256) и файлами этой версии,
+# поэтому в нём всегда последняя версия программы. Не собрался — берётся из прошлого релиза.
+# Релиз для Windows выходит сразу, не дожидаясь Mac. Сборки для Mac (Apple M и Intel) собираются на Mac (macos-latest) из mac/
+# уже после релиза и прикрепляются к нему сами (компьютеров с Mac у GitHub бывает мало — раньше из-за очереди ждали все): подпись проверяется, программа для Apple M
+# запускается в режиме самопроверки. К релизу прикрепляются Pulse-Mac-Apple-M.zip, Pulse-Mac-Intel.zip и mac.json
+# (адреса и SHA-256 — по нему программа на Mac обновляет себя целиком, когда меняется движок).
+name: Выпуск обновления
+on:
+  push:
+    branches: [main]
+    paths: ['updates/**', 'installer/**', 'mac/**', '.github/workflows/release.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  ver:
+    runs-on: ubuntu-latest
+    outputs:
+      ver: ${{ steps.ver.outputs.ver }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: ~/electron-cache
+          key: electron-33.2.1-darwin
+      - name: Новая версия
+        id: ver
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VER=""
+          for d in $(ls -d updates/*/ 2>/dev/null | xargs -n1 basename | sort -V); do
+            gh release view "v$d" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || VER="$d"
+          done
+          echo "Новая версия: ${VER:-нет}"
+          echo "ver=$VER" >> "$GITHUB_OUTPUT"
+      - name: Проверка файлов
+        if: steps.ver.outputs.ver != ''
+        run: |
+          VER="${{ steps.ver.outputs.ver }}"; DIR="updates/$VER"
+          python3 - "$DIR" "$VER" <<'PY'
+          import hashlib, json, sys
+          d, v = sys.argv[1], sys.argv[2]
+          m = json.load(open(f"{d}/latest.json", encoding="utf-8"))
+          z = open(f"{d}/pulse-app-{v}.zip", "rb").read()
+          assert m["version"] == v, "версия в latest.json не совпадает с папкой"
+          assert m["sha256"] == hashlib.sha256(z).hexdigest(), "контрольная сумма не совпадает"
+          assert m["size"] == len(z), "размер не совпадает"
+          print("Файлы в порядке:", v, len(z), "байт")
+          PY
+
+  mac:
+    needs: [ver, release]
+    if: needs.ver.outputs.ver != ''
+    runs-on: macos-latest
+    continue-on-error: true
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Сборки для Mac
+        run: |
+          set -e
+          VER="${{ needs.ver.outputs.ver }}"; Z="updates/$VER/pulse-app-$VER.zip"
+          if ! unzip -l "$Z" | grep -q ' boot.js$'; then echo "в этой версии нет загрузчика для Mac — пропускаю"; exit 0; fi
+          mkdir -p out
+          ELECTRON_CACHE=~/electron-cache bash mac/build.sh "$VER" arm64 "$Z" out/Pulse-Mac-Apple-M.zip
+          ELECTRON_CACHE=~/electron-cache bash mac/build.sh "$VER" x64 "$Z" out/Pulse-Mac-Intel.zip
+          # самопроверка: программа для Apple M запускается, показывает интерфейс и выходит
+          APP="$(cat out/Pulse-Mac-Apple-M.zip.path)"
+          ( "$APP/Contents/MacOS/Pulse" --pulse-selftest "$PWD/out/selftest.json" & P=$!; for i in $(seq 1 90); do kill -0 $P 2>/dev/null || break; sleep 1; done; kill $P 2>/dev/null || true )
+          cat out/selftest.json
+          python3 -c "import json,sys; r=json.load(open('out/selftest.json')); sys.exit(0 if r.get('ok') and r.get('version')==sys.argv[1] else 1)" "$VER"
+          python3 - "$VER" "$GITHUB_REPOSITORY" <<'PY'
+          import hashlib, json, os, sys
+          v, repo = sys.argv[1], sys.argv[2]
+          m = {"version": v, "electron": "33.2.1"}
+          for arch, name in (("arm64", "Pulse-Mac-Apple-M.zip"), ("x64", "Pulse-Mac-Intel.zip")):
+              b = open("out/" + name, "rb").read()
+              m[arch] = {"url": f"https://github.com/{repo}/releases/download/v{v}/{name}", "sha256": hashlib.sha256(b).hexdigest(), "size": len(b)}
+          json.dump(m, open("out/mac.json", "w"), indent=2)
+          print(json.dumps(m, indent=2))
+          PY
+      - name: Прикрепить к релизу
+        run: |
+          VER="${{ needs.ver.outputs.ver }}"
+          if [ -f out/mac.json ]; then gh release upload "v$VER" out/Pulse-Mac-Apple-M.zip out/Pulse-Mac-Intel.zip out/mac.json -R "$GITHUB_REPOSITORY" --clobber; fi
+
+  release:
+    needs: ver
+    if: needs.ver.outputs.ver != ''
+    runs-on: ubuntu-latest
+    concurrency: release
+    steps:
+      - uses: actions/checkout@v4
+      - name: Номер версии
+        id: ver
+        run: echo "ver=${{ needs.ver.outputs.ver }}" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-go@v5
+        if: steps.ver.outputs.ver != ''
+        with:
+          go-version: '1.24.x'
+          cache: false
+      - name: Установщик
+        if: steps.ver.outputs.ver != ''
+        continue-on-error: true
+        run: |
+          set -e
+          VER="${{ steps.ver.outputs.ver }}"; DIR="$PWD/updates/$VER"
+          cd installer
+          mkdir -p electron app
+          EZ=electron/electron-v33.2.1-win32-x64.zip
+          curl -fsSL --retry 3 -o "$EZ" https://github.com/electron/electron/releases/download/v33.2.1/electron-v33.2.1-win32-x64.zip
+          echo "c325a6d905c67107e166267813ea2151ae7fd316c0a88de0081db0b9851a9946  $EZ" | sha256sum -c -
+          unzip -q "$DIR/pulse-app-$VER.zip" -d app
+          test -f app/main.js && test -f app/dist/index.html && test -f app/build/icon.png
+          sed -i "s/AppVersion      = \"[^\"]*\"/AppVersion      = \"$VER\"/" main.go
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -H windowsgui" -o ../Pulse-Desktop-Alpha-Setup.exe .
+          ls -la ../Pulse-Desktop-Alpha-Setup.exe
+      - name: Релиз
+        if: steps.ver.outputs.ver != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VER="${{ steps.ver.outputs.ver }}"; DIR="updates/$VER"
+          FILES=("$DIR/latest.json" "$DIR/pulse-app-$VER.zip")
+          if [ -f Pulse-Desktop-Alpha-Setup.exe ]; then
+            FILES+=(Pulse-Desktop-Alpha-Setup.exe)
+          elif [ -f "$DIR/Pulse-Desktop-Alpha-Setup.exe" ]; then
+            FILES+=("$DIR/Pulse-Desktop-Alpha-Setup.exe")
+          else
+            PREV=$(gh release list -R "$GITHUB_REPOSITORY" --limit 30 --exclude-drafts --exclude-pre-releases --json tagName -q '.[0].tagName')
+            if [ -n "$PREV" ]; then
+              mkdir -p prev
+              gh release download "$PREV" -R "$GITHUB_REPOSITORY" -p 'Pulse-Desktop-Alpha-Setup.exe' -D prev || true
+              [ -f prev/Pulse-Desktop-Alpha-Setup.exe ] && FILES+=(prev/Pulse-Desktop-Alpha-Setup.exe)
+            fi
+          fi
+          NOTES=$(python3 -c "import json,sys;print('\n'.join('• '+n for n in json.load(open(sys.argv[1], encoding='utf-8'))['notes']))" "$DIR/latest.json")
+          # сборки для Mac — только все три файла вместе
+          if [ -f macout/mac.json ] && [ -f macout/Pulse-Mac-Apple-M.zip ] && [ -f macout/Pulse-Mac-Intel.zip ]; then
+            FILES+=(macout/Pulse-Mac-Apple-M.zip macout/Pulse-Mac-Intel.zip macout/mac.json)
+          else echo "сборок для Mac нет — релиз без них"; fi
+          gh release create "v$VER" "${FILES[@]}" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Пульс $VER" --notes "$NOTES" --latest

@@ -1,0 +1,52 @@
+# Досборка Mac-версий к уже вышедшему релизу: если в последнем релизе нет mac.json (сборка на Mac тогда не удалась),
+# собирает Pulse-Mac-Apple-M.zip и Pulse-Mac-Intel.zip, проверяет (самопроверка Apple M) и прикрепляет к нему.
+name: Досборка для Mac
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['mac/build.sh', '.github/workflows/mac-backfill.yml']
+permissions:
+  contents: write
+concurrency: mac-backfill
+jobs:
+  mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: ~/electron-cache
+          key: electron-33.2.1-darwin
+      - name: Какой релиз без Mac
+        id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=$(gh release view -R "$GITHUB_REPOSITORY" --json tagName -q .tagName)
+          HAS=$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets -q 'any(.assets[]; .name == "mac.json")')
+          VER="${TAG#v}"
+          if [ "$HAS" = "true" ] || [ ! -f "updates/$VER/pulse-app-$VER.zip" ]; then echo "нечего дособирать ($TAG)"; echo "ver=" >> "$GITHUB_OUTPUT"; else echo "ver=$VER" >> "$GITHUB_OUTPUT"; fi
+      - name: Сборка и проверка
+        if: steps.v.outputs.ver != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          VER="${{ steps.v.outputs.ver }}"; Z="updates/$VER/pulse-app-$VER.zip"
+          mkdir -p out
+          ELECTRON_CACHE=~/electron-cache bash mac/build.sh "$VER" arm64 "$Z" out/Pulse-Mac-Apple-M.zip
+          ELECTRON_CACHE=~/electron-cache bash mac/build.sh "$VER" x64 "$Z" out/Pulse-Mac-Intel.zip
+          APP="$(cat out/Pulse-Mac-Apple-M.zip.path)"
+          ( "$APP/Contents/MacOS/Pulse" --pulse-selftest "$PWD/out/selftest.json" & P=$!; for i in $(seq 1 90); do kill -0 $P 2>/dev/null || break; sleep 1; done; kill $P 2>/dev/null || true )
+          python3 -c "import json,sys; r=json.load(open('out/selftest.json')); sys.exit(0 if r.get('ok') and r.get('version')==sys.argv[1] else 1)" "$VER"
+          python3 - "$VER" "$GITHUB_REPOSITORY" <<'PY'
+          import hashlib, json, sys
+          v, repo = sys.argv[1], sys.argv[2]
+          m = {"version": v, "electron": "33.2.1"}
+          for arch, name in (("arm64", "Pulse-Mac-Apple-M.zip"), ("x64", "Pulse-Mac-Intel.zip")):
+              b = open("out/" + name, "rb").read()
+              m[arch] = {"url": f"https://github.com/{repo}/releases/download/v{v}/{name}", "sha256": hashlib.sha256(b).hexdigest(), "size": len(b)}
+          json.dump(m, open("out/mac.json", "w"), indent=2)
+          PY
+          gh release upload "v$VER" out/Pulse-Mac-Apple-M.zip out/Pulse-Mac-Intel.zip out/mac.json -R "$GITHUB_REPOSITORY" --clobber

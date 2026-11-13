@@ -1,0 +1,13 @@
+{
+  "name": "pulse-ai-aligner",
+  "private": true,
+  "type": "module",
+  "description": "ИИ-разметка живого текста «Пульса» (собирается в CI, см. .github/workflows/ai-pack.yml)",
+  "dependencies": {
+    "@huggingface/transformers": "~3.3.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.24.2",
+    "playwright": "1.49.1"
+  }
+}

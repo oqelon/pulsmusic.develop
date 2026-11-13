@@ -1,0 +1,17 @@
+# Проверка обновлений «Пульса» на настоящем Mac: обычное обновление по воздуху и замена движка (mac/test/run.sh).
+name: Проверка обновлений на Mac
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['mac/test/**', 'mac/build.sh', '.github/workflows/mac-test.yml']
+jobs:
+  test:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bash mac/test/run.sh

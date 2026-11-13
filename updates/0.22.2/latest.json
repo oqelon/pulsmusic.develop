@@ -1,0 +1,14 @@
+{
+  "version": "0.22.2",
+  "date": "2026-11-09",
+  "notes": [
+    "Исправлена задержка при открытии и закрытии большого плеера и при смене трека в нём",
+    "Улучшена плавность анимаций"
+  ],
+  "url": "https://github.com/pulsmusic/pulse-desktop/releases/download/v0.22.2/pulse-app-0.22.2.zip",
+  "sha256": "65ff6e7e971266503517843b818ced7933636fb56814250b49c57745d84bb7ed",
+  "size": 891626,
+  "minElectron": "33.2.1",
+  "installer": "https://github.com/pulsmusic/pulse-desktop/releases/latest",
+  "online": "https://pulse-online.pulsmusic.workers.dev"
+}

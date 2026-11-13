@@ -1,0 +1,89 @@
+# Пакет ИИ для обложек «Подборок»: вырезание артиста из фото (YOLOS-tiny + MODNet, transformers.js + WebAssembly).
+# Собирается и проверяется здесь, выкладывается служебным пред-релизом cut-pack-<N>. Программа скачивает его сама.
+name: Пакет ИИ (обложки)
+on:
+  push:
+    branches: [main]
+    paths: ['cutter/**', '.github/workflows/cut-pack.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency: cut-pack
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cutter
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Зависимости
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+          pip install -q huggingface_hub
+      - name: Сборка
+        run: node build.mjs
+      - name: Модели и тестовые фото
+        run: |
+          python3 - <<'PY'
+          from huggingface_hub import snapshot_download, hf_hub_download, list_repo_files
+          import os, shutil, re
+          for repo, dst in [("Xenova/yolos-tiny", "pack/models/yolos-tiny"), ("Xenova/modnet", "pack/models/modnet")]:
+              p = snapshot_download(repo, allow_patterns=["*.json", "*.txt", "onnx/model_quantized.onnx", "README.md"])
+              shutil.copytree(p, dst, dirs_exist_ok=True)
+              rd = os.path.join(dst, "README.md")
+              lic = re.findall(r"license:\s*(\S+)", open(rd).read()) if os.path.exists(rd) else []
+              print("модель", repo, "лицензия:", lic)
+              if os.path.exists(rd): os.remove(rd)
+          import json
+          for m in ["yolos-tiny", "modnet"]:
+              pc = f"pack/models/{m}/preprocessor_config.json"; c = json.load(open(pc)); print(m, "было:", json.dumps(c))
+              # детектору хватает 320 точек (ищем крупного человека) — в разы быстрее; вырезанию — 512 (аккуратнее волосы)
+              side = 320 if m == "yolos-tiny" else 512
+              if isinstance(c.get("size"), dict):
+                  if "shortest_edge" in c["size"]: c["size"] = {"shortest_edge": side, "longest_edge": side * 2}
+                  elif "height" in c["size"]: c["size"] = {"height": side, "width": side}
+              elif isinstance(c.get("size"), int): c["size"] = side
+              json.dump(c, open(pc, "w")); print(m, "стало:", json.dumps(c))
+          os.makedirs("pack/test/img", exist_ok=True)
+          fs = [f for f in list_repo_files("Xenova/transformers.js-docs", repo_type="dataset") if re.search(r"\.(jpe?g|png)$", f, re.I)]
+          print("фото в наборе:", fs)
+          ppl = [f for f in fs if re.search(r"portrait|woman|man|person|people|face|selfie|girl|boy|astronaut|artemis|match|crowd|player", f, re.I)]
+          rest = [f for f in fs if f not in ppl]
+          print("с людьми:", ppl)
+          for f in ppl + rest[:14]:
+              try:
+                  p = hf_hub_download("Xenova/transformers.js-docs", f, repo_type="dataset")
+                  if os.path.getsize(p) < 3_000_000: shutil.copy(p, "pack/test/img/" + os.path.basename(f))
+              except Exception as e: print("не скачалось", f, e)
+          for r, _, fl in os.walk("pack/models"):
+              for f in fl: print(os.path.join(r, f), os.path.getsize(os.path.join(r, f)))
+          PY
+      - name: Проверка
+        run: |
+          (cd pack && python3 -m http.server 8124 >/dev/null 2>&1 &)
+          sleep 1
+          node test/run.mjs
+          (cd test-out && zip -q ../cut-test.zip *)
+      - name: Публикация
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          N=$(cat VERSION | tr -d '[:space:]')
+          rm -rf pack/test
+          (cd pack && zip -qr ../pulse-cut-$N.zip .)
+          python3 - "$N" <<'PY'
+          import hashlib, json, sys, datetime
+          n = sys.argv[1]; f = f"pulse-cut-{n}.zip"; d = open(f, "rb").read()
+          json.dump({"v": int(n), "file": f, "url": f"https://github.com/oqelon/pulsmusic.develop/releases/download/cut-pack-{n}/{f}",
+                     "size": len(d), "sha256": hashlib.sha256(d).hexdigest(), "models": ["yolos-tiny", "modnet"],
+                     "date": datetime.date.today().isoformat()}, open("cut-pack.json", "w"), indent=1)
+          print(open("cut-pack.json").read())
+          PY
+          gh release delete "cut-pack-$N" -R "$GITHUB_REPOSITORY" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "cut-pack-$N" "pulse-cut-$N.zip" cut-pack.json cut-test.zip -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "Пакет ИИ для обложек $N (служебный)" --notes "Служебный пакет: вырезание артиста из фото для обложек «Подборок». Скачивается программой автоматически." --prerelease --latest=false

@@ -1,0 +1,13 @@
+{
+  "name": "pulse-ai-cutter",
+  "private": true,
+  "type": "module",
+  "description": "Вырезание артиста из фото для обложек «Подборок» (собирается в CI, см. .github/workflows/cut-pack.yml)",
+  "dependencies": {
+    "@huggingface/transformers": "~3.3.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.24.2",
+    "playwright": "1.49.1"
+  }
+}

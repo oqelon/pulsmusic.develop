@@ -1,0 +1,19 @@
+# Служебное: фото артистов для макетов дизайна (выкладывается в пред-релиз design-assets)
+name: Фото для макетов
+on:
+  push:
+    branches: [main]
+    paths: ['tools/photo/**', '.github/workflows/design-photo.yml']
+permissions:
+  contents: write
+jobs:
+  photo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 tools/photo/fetch.py "Lil Uzi Vert" uzi.jpg
+          gh release view design-assets -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create design-assets -R "$GITHUB_REPOSITORY" --title "Материалы для макетов (служебный)" --notes "Служебные картинки для макетов дизайна." --prerelease --latest=false
+          gh release upload design-assets uzi.jpg -R "$GITHUB_REPOSITORY" --clobber

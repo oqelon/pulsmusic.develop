@@ -1,0 +1,91 @@
+# Пакет ИИ для живого текста (время каждого слова). Собирается и проверяется здесь, в GitHub:
+# 1) собирает aligner.js (transformers.js + WebAssembly), 2) кладёт модель Whisper base (лицензия MIT),
+# 3) проверяет точность на тестовом треке в Chromium (как в «Пульсе»), 4) выкладывает пакет как отдельный
+# пред-релиз ai-pack-<N> (не «последний» — обновления программы он не задевает).
+# Программа скачивает пакет сама, один раз, когда он впервые понадобится (см. ai.js).
+name: Пакет ИИ (живой текст)
+on:
+  push:
+    branches: [main]
+    paths: ['aligner/**', '.github/workflows/ai-pack.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency: ai-pack
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: aligner
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Зависимости
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+          sudo apt-get install -y espeak-ng >/dev/null
+          pip install -q huggingface_hub
+      - name: Сборка
+        run: |
+          node build.mjs
+          ls node_modules/@huggingface/transformers/dist/ | head; node -p "require('./node_modules/@huggingface/transformers/package.json').version"
+          F=$(ls node_modules/@huggingface/transformers/dist/*.mjs | head -1); echo "файл $F"
+          for k in prompt_ids decoder_input_ids _extract_token_timestamps forced_decoder_ids; do echo "--- $k"; grep -o ".\{0,120\}$k.\{0,160\}" "$F" | head -6; done
+      - name: Модель
+        run: |
+          python3 - <<'PY'
+          from huggingface_hub import snapshot_download
+          import os, shutil
+          dst = "pack/models/whisper-base_timestamped"
+          for repo in ["onnx-community/whisper-base_timestamped", "Xenova/whisper-base"]:
+              try:
+                  p = snapshot_download(repo, allow_patterns=["*.json", "*.txt", "onnx/encoder_model.onnx", "onnx/decoder_model_merged_quantized.onnx"])
+                  if os.path.exists(os.path.join(p, "onnx/encoder_model.onnx")):
+                      shutil.copytree(p, dst, dirs_exist_ok=True); print("модель:", repo); break
+              except Exception as e:
+                  print("не получилось", repo, e)
+          for r, _, fs in os.walk(dst):
+              for f in fs: print(os.path.join(r, f), os.path.getsize(os.path.join(r, f)))
+          PY
+          test -f pack/models/whisper-base_timestamped/onnx/encoder_model.onnx
+      - name: Проверка точности
+        run: |
+          node test/match.test.mjs
+          mkdir -p pack/test && cp test/index.html pack/test/
+          python3 test/make_audio.py pack/test
+          (cd pack && python3 -m http.server 8123 >/dev/null 2>&1 &)
+          sleep 1
+          node test/run.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ai-test-report
+          path: |
+            aligner/test-report.json
+            aligner/pack/test/song.wav
+            aligner/pack/test/song.json
+          if-no-files-found: ignore
+      - name: Публикация
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          N=$(cat VERSION | tr -d '[:space:]')
+          (cd pack/test && zip -q ../../ai-test-song.zip song.wav song.json)
+          rm -rf pack/test
+          (cd pack && zip -qr ../pulse-ai-$N.zip .)
+          python3 - "$N" <<'PY'
+          import hashlib, json, os, sys, datetime
+          n = sys.argv[1]; f = f"pulse-ai-{n}.zip"; d = open(f, "rb").read()
+          json.dump({"v": int(n), "file": f, "url": f"https://github.com/oqelon/pulsmusic.develop/releases/download/ai-pack-{n}/{f}",
+                     "size": len(d), "sha256": hashlib.sha256(d).hexdigest(), "model": "whisper-base_timestamped",
+                     "date": datetime.date.today().isoformat()}, open("ai-pack.json", "w"), indent=1)
+          print(open("ai-pack.json").read())
+          PY
+          gh release delete "ai-pack-$N" -R "$GITHUB_REPOSITORY" --yes --cleanup-tag 2>/dev/null || true
+          cp pack/aligner.js aligner.js
+          gh release create "ai-pack-$N" "pulse-ai-$N.zip" ai-pack.json ai-test-song.zip aligner.js -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "Пакет ИИ $N (служебный)" --notes "Служебный пакет для живого текста. Скачивается программой автоматически." --prerelease --latest=false

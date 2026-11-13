@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- значок уведомления берётся по имени — не даём сборке выбросить его как «неиспользуемый» -->
+<resources xmlns:tools="http://schemas.android.com/tools" tools:keep="@drawable/ic_pulse_notif" />

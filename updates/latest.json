@@ -1,0 +1,13 @@
+{
+  "version": "0.22.3",
+  "date": "2026-11-09",
+  "notes": [
+    "Цвет оформления «Красный» стал контрастнее"
+  ],
+  "url": "https://github.com/pulsmusic/pulse-desktop/releases/download/v0.22.3/pulse-app-0.22.3.zip",
+  "sha256": "b6dc96678ef2d0a027a62fc567d0f21a7cd20c9f9cfc10859a46777e92341752",
+  "size": 891625,
+  "minElectron": "33.2.1",
+  "installer": "https://github.com/pulsmusic/pulse-desktop/releases/latest",
+  "online": "https://pulse-online.pulsmusic.workers.dev"
+}
