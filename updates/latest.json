@@ -1,15 +1,15 @@
 {
-  "version": "0.29.0",
+  "version": "0.30.0",
   "date": "2026-11-14",
   "notes": [
-    "Новый значок «Пульса»: в Dock на Mac, на панели задач, в меню «Пуск» и на ярлыках Windows",
+    "Новый значок «Пульса» — светящаяся звезда, как на фоне программы: в Dock на Mac, на панели задач, в меню «Пуск» и на ярлыках Windows",
     "Обновлены значки установщика и сайта"
   ],
-  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.29.0/pulse-app-0.29.0.zip",
-  "sha256": "4f8733b49f5b2a81bf4bd259c7ca0f46c017875ee9f7809612f71ffda602af09",
-  "size": 1222977,
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.30.0/pulse-app-0.30.0.zip",
+  "sha256": "5d24907130492c9179d61523272d38661850b648400c301eb36c90cbbc7bd314",
+  "size": 1227371,
   "minElectron": "33.2.1",
   "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
   "online": "https://pulse-online.pulsmusic.workers.dev",
-  "sig": "76X+U9OVivemjpS9iXv2oxEFHro/a6rE98VzeRR3o2G9fWduWU9HYSjtzGRycVmVZDJRIoZDTcaZhAG09pcBDA=="
+  "sig": "lUhnLtYrJOhlXDYqCyp7q6K1Q+32L+TKbI5U8D14wlytj9WpNI57DJfAGRpRKmn1jHPTdWv7rzvp1IRwM07ZDw=="
 }
