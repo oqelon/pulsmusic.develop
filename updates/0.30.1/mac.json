@@ -1,0 +1,16 @@
+{
+  "version": "0.30.1",
+  "electron": "33.2.1",
+  "arm64": {
+    "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.30.1/Pulse-Mac-Apple-M.zip",
+    "sha256": "86f0819e8edec2817b488dd23863d3be64485da28bd2adb053ccfbdb067af538",
+    "size": 98934473,
+    "sig": "O++O+CjIlXTAlFYFmPAnZ6n8+eaNZkkQintfMe+FGQKbY9DaGD1INKG4zC4QV5WkF2oE+dal0NmMb4cxFS4tCw=="
+  },
+  "x64": {
+    "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.30.1/Pulse-Mac-Intel.zip",
+    "sha256": "ff18e442ca499c7f0f1efd1167592ff7d31a560c770f0de469e037472eddfafc",
+    "size": 106344787,
+    "sig": "sKikPd+IeaLMXZ4UpCblB/7wm+BfxFOgwUVAoLaZDfzQJlydEkPv/2nrdf36Llwuqd5u9LxgNudUWuPFSICcAA=="
+  }
+}
