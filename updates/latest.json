@@ -1,14 +1,16 @@
 {
-  "version": "0.26.1",
+  "version": "0.27.0",
   "date": "2026-11-14",
   "notes": [
-    "Тема Project: исправлена ошибка, из-за которой обложка перерисовывалась при наведении"
+    "Добавлена поддержка образов дисков: музыка внутри ISO и копии аудио-CD (BIN/IMG с CUE) открываются как альбомы, без распаковки",
+    "Добавлены форматы M4B, OGA, WebM и WEBA",
+    "Добавлена запись аудио-CD: треки переводятся в формат CD (16 бит, 44,1 кГц) и записываются средствами системы — правый щелчок по альбому или трекам → «Записать на CD»"
   ],
-  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.26.1/pulse-app-0.26.1.zip",
-  "sha256": "dcb802c25bfad426a0ae4d6f526ead54ac1b64d4cb26f493d8674459de10c574",
-  "size": 1003297,
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.27.0/pulse-app-0.27.0.zip",
+  "sha256": "97732d2b82ebe4148e326bf0837941956708e06c5d7a7b51deb1a500b109293a",
+  "size": 1017837,
   "minElectron": "33.2.1",
   "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
   "online": "https://pulse-online.pulsmusic.workers.dev",
-  "sig": "Pf2/YtaGeafvZlX8mfF36vpJxuKn1kqFQvXSZO1TZOW1NMNgaOAzyj2tG95iViw9yU18VcCwSswHkm100klyBg=="
+  "sig": "nEdZ1LvbB80taLKm9AVSg2+bHZHnhWddOVX/x1mzKUuIgzBFhc+EezrpNeeIBGPojPZduPUp8JzTPlvdPRAbAQ=="
 }
