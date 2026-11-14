@@ -30,7 +30,7 @@ os.makedirs(out, exist_ok=True)
 name = f"pulse-app-{ver}.zip"
 zpath = os.path.join(out, name)
 
-files = ["main.js", "boot.js", "preload.js", "yandex.js", "updater.js", "updsign.js", "security.js", "online.js", "local.js", "burn.js", "yastream.js", "exebrand.js", "exebrand-worker.js", "perfwatch.js", "build/icon.png", "build/icon.ico"] + [
+files = ["main.js", "boot.js", "preload.js", "yandex.js", "updater.js", "updsign.js", "security.js", "online.js", "local.js", "burn.js", "yastream.js", "exebrand.js", "exebrand-worker.js", "perfwatch.js", "build/icon.png", "build/icon-mac.png", "build/icon.ico"] + [
     "dist/" + f for f in sorted(os.listdir(os.path.join(ROOT, "dist")))]
 for f in files:
     if not os.path.isfile(os.path.join(ROOT, f)):
