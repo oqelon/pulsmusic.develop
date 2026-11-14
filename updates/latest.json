@@ -1,16 +1,18 @@
 {
-  "version": "0.27.0",
+  "version": "0.28.0",
   "date": "2026-11-14",
   "notes": [
-    "Добавлена поддержка образов дисков: музыка внутри ISO и копии аудио-CD (BIN/IMG с CUE) открываются как альбомы, без распаковки",
-    "Добавлены форматы M4B, OGA, WebM и WEBA",
-    "Добавлена запись аудио-CD: треки переводятся в формат CD (16 бит, 44,1 кГц) и записываются средствами системы — правый щелчок по альбому или трекам → «Записать на CD»"
+    "Вход по токену Яндекса теперь сразу создаёт аккаунт «Пульса»: имя, фото и @тег подставляются автоматически, без отдельной регистрации",
+    "Данные разных аккаунтов Яндекса на одном компьютере полностью разделены: «Любимое», плейлисты, история и статистика больше не смешиваются, в том числе в Яндекс Музыке",
+    "Обновлён раздел «Друзья»: вкладки «Друзья», «Входящие» и «Исходящие», заявки приходят без перезапуска, счётчик новых заявок на значке",
+    "Добавлены настройки приватности, блокировка пользователей и раздел «Любимое» в профиле друга",
+    "Понятные сообщения при неверном токене, отсутствии сети и недоступности Яндекса — с кнопкой «Повторить»"
   ],
-  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.27.0/pulse-app-0.27.0.zip",
-  "sha256": "97732d2b82ebe4148e326bf0837941956708e06c5d7a7b51deb1a500b109293a",
-  "size": 1017837,
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.28.0/pulse-app-0.28.0.zip",
+  "sha256": "0aed882c263fa627a6b892fcddec43eef8a16de8fb4ec2af9d16885b19eb0864",
+  "size": 1022296,
   "minElectron": "33.2.1",
   "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
   "online": "https://pulse-online.pulsmusic.workers.dev",
-  "sig": "nEdZ1LvbB80taLKm9AVSg2+bHZHnhWddOVX/x1mzKUuIgzBFhc+EezrpNeeIBGPojPZduPUp8JzTPlvdPRAbAQ=="
+  "sig": "tc6rMXuqFXHHrexW3RkLLE/k4LUOQeCoNfzIjdUPBgHHbXO7ge70jRU0YSZPfpKC4C3U3mz9qjDUIOuYrV7aCA=="
 }
