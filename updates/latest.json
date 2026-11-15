@@ -1,17 +1,17 @@
 {
-  "version": "0.31.0",
+  "version": "0.32.0",
   "date": "2026-11-15",
   "notes": [
-    "Новый установщик в стиле «Пульса»: стекло, звезда на фоне и живой текст — шаги установки сменяются строками, как текст песни",
-    "Исправлено: кнопки установщика могли перестать отвечать, если задержаться на первом экране или в окне выбора папки",
-    "Исправлено: двойное нажатие «Установить» больше не запускает установку дважды",
-    "Окно установщика подстраивается под масштаб экрана, а при сбое объясняет, что делать дальше"
+    "Своя музыка: «Пульс» открывает файлы APE (Monkey's Audio) и WavPack — с тегами, обложками, альбомами по CUE и записью на CD",
+    "Статус в Discord: друзья видят «Слушает Пульс» с обложкой, временем трека и кнопкой «Скачать «Пульс»» — Профиль → Яндекс Музыка",
+    "Telegram: карточка играющего трека в любом чате через бота «Пульса» и звезда у имени, пока играет музыка",
+    "Мягкие градиенты во всех темах: полоски, переключатели и кольца переходят между двумя цветами звезды"
   ],
-  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.31.0/pulse-app-0.31.0.zip",
-  "sha256": "ff7d374721db47f9eb492a2df1cf79e856d8e3d4d0bb7cef0a2c54a2470f08d3",
-  "size": 1233289,
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.32.0/pulse-app-0.32.0.zip",
+  "sha256": "c987f1be5b2417da38777726cdad8e618af473fb9598b6d8297ecb9e75f5406a",
+  "size": 1256099,
   "minElectron": "33.2.1",
   "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
   "online": "https://pulse-online.pulsmusic.workers.dev",
-  "sig": "vknyj967GEAEsQV1itw0fjr6bsG1BTj6YcL0UAlPsL4PzyGPez1qecUQxIBZMx9BRzzhpUVtJcfULLX5gs/sBQ=="
+  "sig": "n4TQlVQt5/HXTdDQI90eNdhAP7kgmZXPNSMSjhEI9LSK+qES1WpLLQuTVjX7x700KzgbyNsdavMov0PtOXH+CQ=="
 }

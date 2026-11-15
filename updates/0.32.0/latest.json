@@ -1,0 +1,17 @@
+{
+  "version": "0.32.0",
+  "date": "2026-11-15",
+  "notes": [
+    "Своя музыка: «Пульс» открывает файлы APE (Monkey's Audio) и WavPack — с тегами, обложками, альбомами по CUE и записью на CD",
+    "Статус в Discord: друзья видят «Слушает Пульс» с обложкой, временем трека и кнопкой «Скачать «Пульс»» — Профиль → Яндекс Музыка",
+    "Telegram: карточка играющего трека в любом чате через бота «Пульса» и звезда у имени, пока играет музыка",
+    "Мягкие градиенты во всех темах: полоски, переключатели и кольца переходят между двумя цветами звезды"
+  ],
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.32.0/pulse-app-0.32.0.zip",
+  "sha256": "c987f1be5b2417da38777726cdad8e618af473fb9598b6d8297ecb9e75f5406a",
+  "size": 1256099,
+  "minElectron": "33.2.1",
+  "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
+  "online": "https://pulse-online.pulsmusic.workers.dev",
+  "sig": "n4TQlVQt5/HXTdDQI90eNdhAP7kgmZXPNSMSjhEI9LSK+qES1WpLLQuTVjX7x700KzgbyNsdavMov0PtOXH+CQ=="
+}

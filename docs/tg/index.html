@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Звезда «Пульса»</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+/* Мини-приложение бота «Пульса»: одно действие — разрешить звезду у имени (эмодзи-статус) */
+:root { --bg: #0b090e; --ink: #f4eef4; --ink2: #c9bfcb; --a: #e84f9a; --b: #f5a1bb; color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--ink); font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; display: flex; align-items: center; justify-content: center; padding: 24px max(16px, env(safe-area-inset-left)) 24px max(16px, env(safe-area-inset-right)); text-align: center; }
+main { max-width: 360px; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.star { width: 132px; height: 132px; display: grid; place-items: center; border-radius: 40px; background: radial-gradient(closest-side, rgba(245,161,187,.28), transparent); }
+.star img { width: 100px; height: 100px; animation: glow 2.6s ease-in-out infinite; }
+@keyframes glow { 50% { transform: scale(1.08); filter: drop-shadow(0 0 14px rgba(245,161,187,.8)); } }
+h1 { font-size: 24px; margin: 4px 0 0; letter-spacing: -.02em; }
+p { margin: 0; color: var(--ink2); line-height: 1.5; }
+.name { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 14px; background: rgba(255,255,255,.06); font-weight: 600; }
+.name img { width: 20px; height: 20px; }
+button { margin-top: 8px; width: 100%; height: 50px; border-radius: 25px; border: 0; background: linear-gradient(90deg in oklch, var(--a), var(--b)); color: #fff; font: 700 16px system-ui, sans-serif; cursor: pointer; }
+button:disabled { opacity: .6; }
+.st { min-height: 24px; font-size: 14px; color: var(--b); }
+@media (prefers-reduced-motion: reduce) { .star img { animation: none; } }
+</style>
+</head>
+<body>
+<main>
+  <div class="star"><img src="star100.png" alt=""></div>
+  <h1>Звезда «Пульса» у имени</h1>
+  <p>Пока в «Пульсе» играет музыка, рядом с вашим именем в Telegram горит звезда. Пауза — звезда гаснет сама.</p>
+  <span class="name" id="nm">Вы <img src="star100.png" alt=""></span>
+  <button id="go" type="button">Разрешить</button>
+  <p class="st" id="st" role="status"></p>
+  <p style="font-size:13px">Эмодзи-статус — функция Telegram Premium. Выключить можно в «Пульсе» или командой /stop у бота.</p>
+</main>
+<script>
+(() => {
+  const API = 'https://pulse-online.pulsmusic.workers.dev';
+  const W = window.Telegram && Telegram.WebApp; const st = document.getElementById('st'), go = document.getElementById('go');
+  if (W) { W.ready(); W.expand(); try { W.setHeaderColor('#0b090e'); W.setBackgroundColor('#0b090e'); } catch (e) {} const u = W.initDataUnsafe && W.initDataUnsafe.user; if (u) document.getElementById('nm').firstChild.textContent = (u.first_name || 'Вы') + ' '; }
+  const say = (t) => { st.textContent = t; };
+  go.addEventListener('click', () => {
+    if (!W || !W.initData) { say('Откройте это окно из чата с ботом «Пульса».'); return; }
+    if (!W.isVersionAtLeast || !W.isVersionAtLeast('8.0') || !W.requestEmojiStatusAccess) { say('Обновите Telegram — эта версия не умеет эмодзи-статус.'); return; }
+    go.disabled = true; say('');
+    W.requestEmojiStatusAccess(async (ok) => {
+      if (!ok) { go.disabled = false; say('Не разрешено. Можно нажать ещё раз.'); return; }
+      try {
+        const r = await fetch(API + '/tg/allowed', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ initData: W.initData }) });
+        const d = await r.json();
+        if (!d.ok) throw new Error(d.error || 'ошибка');
+        say(d.linked ? 'Готово! Включите музыку в «Пульсе».' : 'Сначала подключите «Пульс» к этому Telegram.');
+        setTimeout(() => W.close(), 1800);
+      } catch (e) { go.disabled = false; say('Не получилось: ' + e.message + '. Попробуйте ещё раз.'); }
+    });
+  });
+})();
+</script>
+</body>
+</html>
