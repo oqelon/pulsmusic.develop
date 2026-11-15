@@ -1,0 +1,16 @@
+{
+  "version": "0.34.0",
+  "date": "2026-11-15",
+  "notes": [
+    "«Запись CD» → «В файлы WAV»: перевод музыки в WAV для аудио-CD (16 бит, 44,1 кГц, стерео)",
+    "Файлы и целые папки, статус и прогресс каждого трека, остановка в любой момент",
+    "Каждый готовый файл проверяется, исходники не меняются, существующие файлы не перезаписываются без спроса"
+  ],
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.34.0/pulse-app-0.34.0.zip",
+  "sha256": "0cdc05fa29a62d2f1f20897ab15e9c586282a017e2e9f1da5205b1a67dbb8bb5",
+  "size": 1270971,
+  "minElectron": "33.2.1",
+  "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
+  "online": "https://pulse-online.pulsmusic.workers.dev",
+  "sig": "7pChmP1IjUcoVQjJ6r1x/5RCJylbGAMfjUXPozynrlqzGeP4+UA3+y9AxAJINmt6Qvo1FSGGYak9FSlfOqOlDg=="
+}
