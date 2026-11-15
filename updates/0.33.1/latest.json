@@ -1,0 +1,15 @@
+{
+  "version": "0.33.1",
+  "date": "2026-11-15",
+  "notes": [
+    "Узкое меню слева стало ещё компактнее — больше места для музыки",
+    "Иконки, обложки и звезда в узком меню выровнены по одной линии"
+  ],
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.33.1/pulse-app-0.33.1.zip",
+  "sha256": "ab9aa38edc778afa0e0b787f90f825a168feb41eb4b32ed09ffc31230cca24a5",
+  "size": 1258889,
+  "minElectron": "33.2.1",
+  "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
+  "online": "https://pulse-online.pulsmusic.workers.dev",
+  "sig": "ETWrB3EeKBXsu2jTPxmrbG8gC/e9kxfSxBZn77LCITTL7soB+D7vkEOaOkQCwJzR7JLsS81iGBWeo2SPg37LBg=="
+}
