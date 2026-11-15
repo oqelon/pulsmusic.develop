@@ -1,15 +1,17 @@
 {
-  "version": "0.30.2",
+  "version": "0.31.0",
   "date": "2026-11-15",
   "notes": [
-    "В чатах снова работают галочки: одна — сообщение доставлено, две — прочитано; новые сообщения появляются в открытом чате без перезапуска, даже если живое соединение с сервером прервалось",
-    "У имён в друзьях, чатах и «Искре» показываются значок разработчика и галочка подписки Плюс — как в профиле"
+    "Новый установщик в стиле «Пульса»: стекло, звезда на фоне и живой текст — шаги установки сменяются строками, как текст песни",
+    "Исправлено: кнопки установщика могли перестать отвечать, если задержаться на первом экране или в окне выбора папки",
+    "Исправлено: двойное нажатие «Установить» больше не запускает установку дважды",
+    "Окно установщика подстраивается под масштаб экрана, а при сбое объясняет, что делать дальше"
   ],
-  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.30.2/pulse-app-0.30.2.zip",
-  "sha256": "0611ac79e8d996a820516dec0b72073fb9ba9d116d9bc848b1a985c286d81750",
-  "size": 1233290,
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.31.0/pulse-app-0.31.0.zip",
+  "sha256": "ff7d374721db47f9eb492a2df1cf79e856d8e3d4d0bb7cef0a2c54a2470f08d3",
+  "size": 1233289,
   "minElectron": "33.2.1",
   "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
   "online": "https://pulse-online.pulsmusic.workers.dev",
-  "sig": "nzEa6epu9nUd/W5fPeWWehJNw2fFsu2nypP82UHtvJu4+pbdVtkK/Lc5QDAdID5W6JrmUMy8VHtUgFlkuneNCA=="
+  "sig": "vknyj967GEAEsQV1itw0fjr6bsG1BTj6YcL0UAlPsL4PzyGPez1qecUQxIBZMx9BRzzhpUVtJcfULLX5gs/sBQ=="
 }

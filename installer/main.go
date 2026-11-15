@@ -86,6 +86,7 @@ var (
 	st       = State{Phase: "idle"}
 	cancelFn context.CancelFunc
 	lastSeen = time.Now()
+	picking  bool // открыт системный диалог выбора папки — окно в это время молчит
 	quitCh   = make(chan struct{}, 1)
 )
 
@@ -681,7 +682,12 @@ func serve(tok string) (string, error) {
 		js(w, map[string]any{"freeMB": diskFreeMB(r.URL.Query().Get("dir"))})
 	})
 	api("/api/pickdir", func(w http.ResponseWriter, r *http.Request) {
+		set(func(*State) { picking = true })
 		p, err := pickDir(r.URL.Query().Get("dir"))
+		mu.Lock()
+		picking = false
+		lastSeen = time.Now()
+		mu.Unlock()
 		if err != nil {
 			js(w, map[string]any{"dir": "", "err": err.Error()})
 			return
@@ -697,14 +703,18 @@ func serve(tok string) (string, error) {
 		if err := json.NewDecoder(r.Body).Decode(&o); err != nil || o.Dir == "" {
 			o = Opts{Dir: defaultDir(), Desktop: true, StartMenu: true}
 		}
+		// «занято» проверяем и ставим под одной блокировкой: двойной щелчок не запустит вторую установку
 		mu.Lock()
 		busy := st.Phase == "installing"
+		var ctx context.Context
+		if !busy {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithCancel(context.Background())
+			cancelFn = cancel
+			st = State{Phase: "installing", Pct: 0, Step: 0, Detail: "Начинаю", Dir: st.Dir}
+		}
 		mu.Unlock()
 		if !busy {
-			ctx, cancel := context.WithCancel(context.Background())
-			mu.Lock()
-			cancelFn = cancel
-			mu.Unlock()
 			go func() {
 				err := runInstall(ctx, o)
 				if err != nil {
@@ -780,8 +790,10 @@ func main() {
 			stop()
 			return
 		case <-tick.C:
+			// окно раз в несколько секунд отмечается; молчит больше двух минут (окно закрыли, а Edge не завершился) — выходим.
+			// Раньше хватало 25 секунд тишины — и установщик закрывался, пока человек читал первый экран: кнопки «умирали».
 			mu.Lock()
-			idle := time.Since(lastSeen) > 25*time.Second && st.Phase != "installing"
+			idle := time.Since(lastSeen) > 150*time.Second && st.Phase != "installing" && !picking
 			mu.Unlock()
 			if idle && os.Getenv("PULSE_SETUP_PRINT_URL") != "1" {
 				stop()
