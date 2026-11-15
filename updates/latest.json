@@ -1,15 +1,15 @@
 {
-  "version": "0.30.1",
-  "date": "2026-11-14",
+  "version": "0.30.2",
+  "date": "2026-11-15",
   "notes": [
-    "Новый значок теперь виден и у закрытой программы: на ярлыках и в панели задач Windows, в Dock и Finder на Mac",
-    "Исправлено: после выхода из программы показывался прежний значок"
+    "В чатах снова работают галочки: одна — сообщение доставлено, две — прочитано; новые сообщения появляются в открытом чате без перезапуска, даже если живое соединение с сервером прервалось",
+    "У имён в друзьях, чатах и «Искре» показываются значок разработчика и галочка подписки Плюс — как в профиле"
   ],
-  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.30.1/pulse-app-0.30.1.zip",
-  "sha256": "a5c23564acb7a5b480b8500084f2800bd78087ad0006bb1f901ca32e0707f4d3",
-  "size": 1232997,
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.30.2/pulse-app-0.30.2.zip",
+  "sha256": "0611ac79e8d996a820516dec0b72073fb9ba9d116d9bc848b1a985c286d81750",
+  "size": 1233290,
   "minElectron": "33.2.1",
   "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
   "online": "https://pulse-online.pulsmusic.workers.dev",
-  "sig": "BqIwnJPTwS6wlLS3AYtWJ97KBTSGy+RJGMHMXwI7774AV5OPmGp5IcqPToxNC/JYiyO7iPq21snmPoIjNMwhDg=="
+  "sig": "nzEa6epu9nUd/W5fPeWWehJNw2fFsu2nypP82UHtvJu4+pbdVtkK/Lc5QDAdID5W6JrmUMy8VHtUgFlkuneNCA=="
 }
