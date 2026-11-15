@@ -1,0 +1,14 @@
+{
+  "version": "0.33.2",
+  "date": "2026-11-15",
+  "notes": [
+    "Узкое меню слева стало полностью скруглённым сверху и снизу"
+  ],
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.33.2/pulse-app-0.33.2.zip",
+  "sha256": "28dd0c328606b621f69c7688b6d9ea6f097d6ae32b6077660695cf299b3aeb20",
+  "size": 1258906,
+  "minElectron": "33.2.1",
+  "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
+  "online": "https://pulse-online.pulsmusic.workers.dev",
+  "sig": "pSN7J16Y/dY2RBIHL3KnKj2+LZ5SF7Tgu3jcqJRIScXo8Iwr5tMdwSut8ntfwnYMqGUpTCNcn+PEWUbHGxY8Dg=="
+}
