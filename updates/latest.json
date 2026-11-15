@@ -1,15 +1,15 @@
 {
-  "version": "0.32.1",
+  "version": "0.32.2",
   "date": "2026-11-15",
   "notes": [
-    "Discord: в статусе теперь видно исполнителя — «Слушает <исполнитель>» вместо «Слушает Пульс»",
-    "Discord: обложка и значок в статусе загружаются надёжнее"
+    "Запись CD: треки из альбомов одним файлом (APE, WavPack, WAV, BIN с CUE) готовятся по одному, без загрузки всего альбома в память — ошибка «Failed to fetch» исправлена",
+    "Запись CD: если трек не прочитался, программа называет его и объясняет причину"
   ],
-  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.32.1/pulse-app-0.32.1.zip",
-  "sha256": "e7d7b4b0d4deb4598f543852d94bd7bae3dd4296d6fd11eef7e53428615c3649",
-  "size": 1256416,
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.32.2/pulse-app-0.32.2.zip",
+  "sha256": "74e6e3568430ed11b34176d306c921c8e4a6f94a8c93b99f5b00bedf648e83f9",
+  "size": 1257616,
   "minElectron": "33.2.1",
   "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
   "online": "https://pulse-online.pulsmusic.workers.dev",
-  "sig": "8uoWRNncvjlvnkk6X0poEyYhStnxkbHYqRP7RXzkbw7XRQ60MGAcgzKdKykfe4AZUSjP1OQRc1inWHj8EdInCw=="
+  "sig": "9PcEbODnpQA8hNOhHRGh0/mqxitEIMrkfO1Ox/xXND9an9P7jj38UOTaUPAQ9HyygfYPorXMTzPLm6zX/y/0Dw=="
 }
