@@ -1,16 +1,14 @@
 {
-  "version": "0.35.3",
+  "version": "0.35.4",
   "date": "2026-11-16",
   "notes": [
-    "Запись CD и перевод в WAV работают с длинными файлами любого размера — звук читается кусками, без ошибки «файл не прочитался»",
-    "Повреждённое место в файле больше не останавливает запись: вместо него тишина и пометка у трека",
-    "Для файлов 44,1 кГц, 16 бит результат совпадает с исходником бит в бит"
+    "В свёрнутом меню снова видны аватарки исполнителей"
   ],
-  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.35.3/pulse-app-0.35.3.zip",
-  "sha256": "4495e67d1ef5189cf88632f0b10fdb95ac7182987340663d90b6b00300b27e43",
-  "size": 1061456,
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.35.4/pulse-app-0.35.4.zip",
+  "sha256": "37be11b39b33edaba0569981c1dc3d5c78234e4feffae2c8f9fb9a2f6ee23518",
+  "size": 1061487,
   "minElectron": "33.2.1",
   "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
   "online": "https://pulse-online.pulsmusic.workers.dev",
-  "sig": "ZyGYf09ujOT0WZ5ku2FpFANHIfcSQcF4c18fyeb6vtQ2lVdRZqfqOsqtQVlLIUiwbt7hAipdNPEMrZgUljpoAQ=="
+  "sig": "rMbsK3bYPlwQsHOFyZglticERhiaNGKmtEon1ut0NQF2kNNKmBXt7JD1jj9wo8USWCRtwMFV7b1wsg9xg/NYCw=="
 }
