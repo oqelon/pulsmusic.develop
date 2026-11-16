@@ -1,0 +1,17 @@
+{
+  "version": "0.35.1",
+  "date": "2026-11-16",
+  "notes": [
+    "Новая иконка: графитовая плитка с арбузным знаком, для Mac — по форме системных иконок",
+    "Компактнее колонка слева и верхняя строка, мини-плеер выровнен, обложка в нём крупнее",
+    "Кружки артистов: тонкий ободок, а за полностью прослушанного артиста — градиентный",
+    "Запись CD и перевод в WAV теперь работают с альбомами одним файлом FLAC с CUE"
+  ],
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.35.1/pulse-app-0.35.1.zip",
+  "sha256": "dc9bf75b5e971d06368b274f8ba034481612190ab866761963b91985d6755e79",
+  "size": 1059597,
+  "minElectron": "33.2.1",
+  "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
+  "online": "https://pulse-online.pulsmusic.workers.dev",
+  "sig": "Tn9l6bD1+Ij9Bt7a7i1HZmM2+bz/OcO4sqAgU0bVkxQrigKFTQlYw7Yzi3+rkRKMfH0ZdvPgqCGMPmRj2JDiBA=="
+}
