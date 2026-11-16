@@ -1,0 +1,16 @@
+{
+  "version": "0.35.2",
+  "date": "2026-11-16",
+  "notes": [
+    "Интерфейс масштабируется под размер окна и полный экран — на большом мониторе больше нет пустого места справа",
+    "Страницы растягиваются на всю ширину, профиль на широком экране — в две колонки",
+    "Колонка слева и верхняя строка — 64, кружки артистов на главной без внешнего ободка"
+  ],
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.35.2/pulse-app-0.35.2.zip",
+  "sha256": "44c03b716cf493c4e884ade6620c0c5b36649f78d23ce06865ad738dcc9f3ad4",
+  "size": 1060080,
+  "minElectron": "33.2.1",
+  "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
+  "online": "https://pulse-online.pulsmusic.workers.dev",
+  "sig": "Zo+oE6ic/dVcAF1eMoqd7VdgWFWQ6Ajnv4r6nQUR1O7sv1fsPHoyA5zV+QEzd+fVcxgCSiPuvgR7AW/45LcRCg=="
+}
