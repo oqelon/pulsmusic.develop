@@ -2,13 +2,16 @@
   "version": "0.35.0",
   "date": "2026-11-16",
   "notes": [
-    "Новый дизайн «Пульса» — теперь основная тема: тёмно-серый, арбузный и сакура\nМатовое стекло у плеера, выбранного пункта меню, меню и подсказок\nНовая заставка при запуске: знак бьётся двойным ударом и раскрывает экран\nНовая иконка программы\nПрежний дизайн остался — его можно включить в профиле, в разделе тем"
+    "Новый дизайн «Пульса» стал основной темой: тёмно-серый, арбузный и сакура",
+    "Матовое стекло у плеера, выбранного пункта меню, меню и подсказок",
+    "Новая заставка при запуске и новая иконка программы",
+    "Прежний дизайн сохранён — его можно включить в профиле, в разделе тем"
   ],
   "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.35.0/pulse-app-0.35.0.zip",
-  "sha256": "307a8d81dd184a1f8356fad986c06418d0042337d58ca6def835fda92972f52e",
+  "sha256": "663e5ed65875bfc930ddd9fc747aab7738b7225c42b78eedf274a5ff2ee309f1",
   "size": 1055266,
   "minElectron": "33.2.1",
   "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
   "online": "https://pulse-online.pulsmusic.workers.dev",
-  "sig": "oAgN7TUVobsfm1tkgK7Shgyj7RXZ8dDcZfztcafjv5ofG2yvJBKF0bxT3T+RwGAmn+pCSFWLmywXI+m5Bod2Dg=="
+  "sig": "5aZF7jccj16VPbdI1trw3ODH9rxRIt8BCT6m3lKX0Lygz10CIlBHXxAYJJb2OyDOql8xdxDcOLjZg3NeKPd7DQ=="
 }
