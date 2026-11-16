@@ -1,14 +1,16 @@
 {
-  "version": "0.35.4",
+  "version": "0.35.5",
   "date": "2026-11-16",
   "notes": [
+    "Запись CD и перевод в WAV: звук теперь читается напрямую программой, без ошибки «Failed to fetch»",
+    "Если файл всё же не открылся, у трека написана понятная причина: нет доступа к папке, файл перемещён и т. п.",
     "В свёрнутом меню снова видны аватарки исполнителей"
   ],
-  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.35.4/pulse-app-0.35.4.zip",
-  "sha256": "37be11b39b33edaba0569981c1dc3d5c78234e4feffae2c8f9fb9a2f6ee23518",
-  "size": 1061487,
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.35.5/pulse-app-0.35.5.zip",
+  "sha256": "98de926a713171598ba60a2f82c22d2665e07772675354f360eb3245081c9b02",
+  "size": 1062466,
   "minElectron": "33.2.1",
   "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
   "online": "https://pulse-online.pulsmusic.workers.dev",
-  "sig": "rMbsK3bYPlwQsHOFyZglticERhiaNGKmtEon1ut0NQF2kNNKmBXt7JD1jj9wo8USWCRtwMFV7b1wsg9xg/NYCw=="
+  "sig": "iTTENDozkmbC9rkvaRREFOov5ue8EWC+nfSK365TYIAlaKX3/H4x7gT+r5OdBM1mE0aCro+mzuIcXFIhOe6QDw=="
 }
