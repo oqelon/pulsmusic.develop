@@ -1,0 +1,14 @@
+{
+  "version": "0.37.6",
+  "date": "2026-11-17",
+  "notes": [
+    "Кнопка «Слушать» и другие цветные кнопки при наведении больше не теряют значок"
+  ],
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.37.6/pulse-app-0.37.6.zip",
+  "sha256": "9b83e823026de15895c06db8cac5749e70215e677488ad388f5487dfaf52a839",
+  "size": 1141978,
+  "minElectron": "33.2.1",
+  "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
+  "online": "https://pulse-online.pulsmusic.workers.dev",
+  "sig": "LlPlMxj7vURz3PdjMYAp3SC/fGyqRTPJj/z0UY+rdlUYfMAmWey38yA9CWUBsU414+4Oqai/aPApz3NthuPWAg=="
+}

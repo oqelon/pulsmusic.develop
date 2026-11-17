@@ -1,14 +1,14 @@
 {
-  "version": "0.37.5",
+  "version": "0.37.6",
   "date": "2026-11-17",
   "notes": [
-    "Имена исполнителей, названия альбомов и плейлистов в шапке — снова чисто белые"
+    "Кнопка «Слушать» и другие цветные кнопки при наведении больше не теряют значок"
   ],
-  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.37.5/pulse-app-0.37.5.zip",
-  "sha256": "ec52f146bb692b2ff5b57669961eebed97200c2d19aaf1896846fbf2a9b39a2c",
-  "size": 1141909,
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.37.6/pulse-app-0.37.6.zip",
+  "sha256": "9b83e823026de15895c06db8cac5749e70215e677488ad388f5487dfaf52a839",
+  "size": 1141978,
   "minElectron": "33.2.1",
   "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
   "online": "https://pulse-online.pulsmusic.workers.dev",
-  "sig": "uWX88VkVmWEZ8jeY2fHYJA4cz01IN9ggnHF2e/l+0drXV/uIXFHYedsjpqfcJJCHVVtTRPLotKScrKc9R2fDCQ=="
+  "sig": "LlPlMxj7vURz3PdjMYAp3SC/fGyqRTPJj/z0UY+rdlUYfMAmWey38yA9CWUBsU414+4Oqai/aPApz3NthuPWAg=="
 }
