@@ -1,16 +1,17 @@
 {
-  "version": "0.35.5",
-  "date": "2026-11-16",
+  "version": "0.36.0",
+  "date": "2026-11-17",
   "notes": [
-    "Запись CD и перевод в WAV: звук теперь читается напрямую программой, без ошибки «Failed to fetch»",
-    "Если файл всё же не открылся, у трека написана понятная причина: нет доступа к папке, файл перемещён и т. п.",
-    "В свёрнутом меню снова видны аватарки исполнителей"
+    "Новый вид темы «Пульс»: чёрное и белое по шкале серого, без лишних цветов, стекла и свечения",
+    "Профиль — отдельная плитка в левом верхнем углу, колонка, остров и мини-плеер — одной высоты 64, всё по одной линии",
+    "Тоньше мини-плеер и остров «сейчас играет»: круглая обложка 48, название и исполнитель в две строки",
+    "Мини-эквалайзер с круглыми концами полосок, компактная плашка качества звука"
   ],
-  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.35.5/pulse-app-0.35.5.zip",
-  "sha256": "98de926a713171598ba60a2f82c22d2665e07772675354f360eb3245081c9b02",
-  "size": 1062466,
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.36.0/pulse-app-0.36.0.zip",
+  "sha256": "e5e4987f80a352741ae9de2fb927845e29c92d5d2d2401ff6ffa9971f8ea70ad",
+  "size": 1063612,
   "minElectron": "33.2.1",
   "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
   "online": "https://pulse-online.pulsmusic.workers.dev",
-  "sig": "iTTENDozkmbC9rkvaRREFOov5ue8EWC+nfSK365TYIAlaKX3/H4x7gT+r5OdBM1mE0aCro+mzuIcXFIhOe6QDw=="
+  "sig": "MZNPGtWAblPocCMi+7W1MgkesdtcOHNW0EKC1RuRLE+v2BUR63eFCAmEnhjUkHHcLkM3LdnCOwi1Lymr2vpqDA=="
 }
