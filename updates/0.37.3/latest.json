@@ -1,0 +1,14 @@
+{
+  "version": "0.37.3",
+  "date": "2026-11-17",
+  "notes": [
+    "Плеер: надпись «Lossless» больше не сливается с фоном"
+  ],
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.37.3/pulse-app-0.37.3.zip",
+  "sha256": "d56df81493be74e64e6a5a38937b0516ed5d7b0b35e15c051625a420f8810477",
+  "size": 1141857,
+  "minElectron": "33.2.1",
+  "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
+  "online": "https://pulse-online.pulsmusic.workers.dev",
+  "sig": "/aVO+se2jbKae7NWUe2HLlegJYq+X1q0fcNkO6bVWTY4NLTSTmOUw0/DsXtlPuabSXJ32NAhvhh/qznccILJBg=="
+}
