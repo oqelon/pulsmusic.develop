@@ -1,0 +1,14 @@
+{
+  "version": "0.37.5",
+  "date": "2026-11-17",
+  "notes": [
+    "Имена исполнителей, названия альбомов и плейлистов в шапке — снова чисто белые"
+  ],
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.37.5/pulse-app-0.37.5.zip",
+  "sha256": "ec52f146bb692b2ff5b57669961eebed97200c2d19aaf1896846fbf2a9b39a2c",
+  "size": 1141909,
+  "minElectron": "33.2.1",
+  "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
+  "online": "https://pulse-online.pulsmusic.workers.dev",
+  "sig": "uWX88VkVmWEZ8jeY2fHYJA4cz01IN9ggnHF2e/l+0drXV/uIXFHYedsjpqfcJJCHVVtTRPLotKScrKc9R2fDCQ=="
+}
