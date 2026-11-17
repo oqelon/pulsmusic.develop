@@ -1,0 +1,14 @@
+{
+  "version": "0.37.4",
+  "date": "2026-11-17",
+  "notes": [
+    "Значок подтверждения у исполнителей и в профиле — в цвете главных кнопок, галочка внутри всегда видна"
+  ],
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.37.4/pulse-app-0.37.4.zip",
+  "sha256": "c660fa1d755da42cf3d3495ff47de617b34dd29fee2b506f599392a1283dee47",
+  "size": 1141857,
+  "minElectron": "33.2.1",
+  "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
+  "online": "https://pulse-online.pulsmusic.workers.dev",
+  "sig": "bT6tYtTxG/US1Z8tWRjz9BnpNhh7WiiYUWhqByzYDxEnzquaNGqiYm36Wm3en4hNSj15CtTsWPZ4u2esI5R4Cw=="
+}
