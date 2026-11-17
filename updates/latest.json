@@ -1,17 +1,14 @@
 {
-  "version": "0.36.0",
+  "version": "0.36.1",
   "date": "2026-11-17",
   "notes": [
-    "Новый вид темы «Пульс»: чёрное и белое по шкале серого, без лишних цветов, стекла и свечения",
-    "Профиль — отдельная плитка в левом верхнем углу, колонка, остров и мини-плеер — одной высоты 64, всё по одной линии",
-    "Тоньше мини-плеер и остров «сейчас играет»: круглая обложка 48, название и исполнитель в две строки",
-    "Мини-эквалайзер с круглыми концами полосок, компактная плашка качества звука"
+    "Аватар в плитке профиля крупнее — 48, как обложка в острове и плеере"
   ],
-  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.36.0/pulse-app-0.36.0.zip",
-  "sha256": "e5e4987f80a352741ae9de2fb927845e29c92d5d2d2401ff6ffa9971f8ea70ad",
-  "size": 1063612,
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.36.1/pulse-app-0.36.1.zip",
+  "sha256": "35587d0c48dd8d302a0bbfe34c5ae4a9ba8db579a2f3222cfadf3840cc38c822",
+  "size": 1063649,
   "minElectron": "33.2.1",
   "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
   "online": "https://pulse-online.pulsmusic.workers.dev",
-  "sig": "MZNPGtWAblPocCMi+7W1MgkesdtcOHNW0EKC1RuRLE+v2BUR63eFCAmEnhjUkHHcLkM3LdnCOwi1Lymr2vpqDA=="
+  "sig": "Xg5XJxwjzwnEOmwhP4IVhwzCDj2kKIC9ImvAVNsVkoVu43Tkc3H22kg+1RgwrkBtljPPON9eTkpsGpjm55EkBQ=="
 }

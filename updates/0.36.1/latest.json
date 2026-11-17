@@ -1,0 +1,14 @@
+{
+  "version": "0.36.1",
+  "date": "2026-11-17",
+  "notes": [
+    "Аватар в плитке профиля крупнее — 48, как обложка в острове и плеере"
+  ],
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.36.1/pulse-app-0.36.1.zip",
+  "sha256": "35587d0c48dd8d302a0bbfe34c5ae4a9ba8db579a2f3222cfadf3840cc38c822",
+  "size": 1063649,
+  "minElectron": "33.2.1",
+  "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
+  "online": "https://pulse-online.pulsmusic.workers.dev",
+  "sig": "Xg5XJxwjzwnEOmwhP4IVhwzCDj2kKIC9ImvAVNsVkoVu43Tkc3H22kg+1RgwrkBtljPPON9eTkpsGpjm55EkBQ=="
+}
