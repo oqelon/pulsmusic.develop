@@ -1,0 +1,15 @@
+{
+  "version": "0.37.1",
+  "date": "2026-11-17",
+  "notes": [
+    "Новый профиль с баннером, как в Discord: свой баннер, большой аватар со статусом, «Слушает» с живым эквалайзером, награды и «О себе»",
+    "Мини-плеер: перемотка теперь работает по всей ширине — легко отмотать в самое начало и в конец"
+  ],
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.37.1/pulse-app-0.37.1.zip",
+  "sha256": "ab67052ba83512efb087d7be04f3a0f22c2a4284fa39177a222f809133b8cda6",
+  "size": 1141053,
+  "minElectron": "33.2.1",
+  "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
+  "online": "https://pulse-online.pulsmusic.workers.dev",
+  "sig": "LkfYWQpCSS6k6UbA+coCoV2nHxISL7aKFjQrKLYwUsY9z6dvv19cO5/U7zw3Gen2dcTkLkPfWzAUVH0asbD6DA=="
+}

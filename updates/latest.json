@@ -1,23 +1,15 @@
 {
-  "version": "0.37.0",
+  "version": "0.37.1",
   "date": "2026-11-17",
   "notes": [
-    "Новый раздел «Пульс Студио» в меню: своя музыка с компьютера, запись CD и перевод в WAV в одном месте",
-    "Новый шрифт: широкие жирные заголовки, тонкий читаемый текст",
-    "Цвет главных кнопок: индиго по умолчанию, можно выбрать свой в профиле — «Оформление»",
-    "Плитки «Любимые» и «Недавние» с крупным числом треков",
-    "Мини-плеер в одну строку: перемотка по нижнему краю, без лишних подложек",
-    "Значки меню заполняются при выборе, плавное сворачивание меню",
-    "Эквалайзер в острове снова анимируется, сплошные значки плеера",
-    "Профиль в углу виден и в широком меню, зелёный статус у аватарки",
-    "Метка «Альфа» сверху: можно сообщить об ошибке на pulsmusic.ru@gmail.com",
-    "Ровные отступы, логотип по размеру значков, исправлены белый текст на белом и полоски у поиска"
+    "Новый профиль с баннером, как в Discord: свой баннер, большой аватар со статусом, «Слушает» с живым эквалайзером, награды и «О себе»",
+    "Мини-плеер: перемотка теперь работает по всей ширине — легко отмотать в самое начало и в конец"
   ],
-  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.37.0/pulse-app-0.37.0.zip",
-  "sha256": "9782ca0638edf6b82b208328a5695ea1e00dd145f3bf97cc8c2dc1573255029f",
-  "size": 1137441,
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.37.1/pulse-app-0.37.1.zip",
+  "sha256": "ab67052ba83512efb087d7be04f3a0f22c2a4284fa39177a222f809133b8cda6",
+  "size": 1141053,
   "minElectron": "33.2.1",
   "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
   "online": "https://pulse-online.pulsmusic.workers.dev",
-  "sig": "eFyKk8lFvRHFnLhDlJdxd7x0lMkHSrW7OccDCG8wcvyHgf16+t567YnyTGOkxwitRdb467ybAHqDgI1APJ+oAw=="
+  "sig": "LkfYWQpCSS6k6UbA+coCoV2nHxISL7aKFjQrKLYwUsY9z6dvv19cO5/U7zw3Gen2dcTkLkPfWzAUVH0asbD6DA=="
 }
