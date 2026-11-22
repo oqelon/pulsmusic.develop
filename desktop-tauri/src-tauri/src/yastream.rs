@@ -204,6 +204,7 @@ fn log() -> &'static Mutex<std::collections::VecDeque<LogRow>> {
     L.get_or_init(|| Mutex::new(std::collections::VecDeque::new()))
 }
 fn t0() -> Instant { static T: OnceLock<Instant> = OnceLock::new(); *T.get_or_init(Instant::now) }
+pub fn log_last(n: usize) -> Vec<LogRow> { log().lock().map(|l| l.iter().rev().take(n).rev().cloned().collect()).unwrap_or_default() }
 pub fn log_of(id: &str) -> Vec<LogRow> { log().lock().map(|l| l.iter().filter(|r| r.id == id).cloned().collect()).unwrap_or_default() }
 
 pub async fn serve(id: &str, range: Option<String>) -> Response<Vec<u8>> {
@@ -213,7 +214,7 @@ pub async fn serve(id: &str, range: Option<String>) -> Response<Vec<u8>> {
         if l.len() >= 600 { l.pop_front(); }
         l.push_back(LogRow {
             id: id.to_string(),
-            at_ms: start.duration_since(t0()).as_millis() as u64,
+            at_ms: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0).saturating_sub(start.elapsed().as_millis() as u64),
             asked: range.unwrap_or_else(|| "—".into()),
             status: r.status().as_u16(),
             served: r.headers().get(header::CONTENT_RANGE).and_then(|v| v.to_str().ok()).unwrap_or("").to_string(),

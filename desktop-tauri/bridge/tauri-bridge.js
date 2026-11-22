@@ -22,6 +22,28 @@
   window.addEventListener('unhandledrejection', function (e) { var r = e.reason; enote('promise', (r && (r.stack || r.message)) || r); });
   var cerr = console.error.bind(console);
   console.error = function () { try { enote('console', Array.prototype.map.call(arguments, function (a) { return a && a.stack ? a.stack : typeof a === 'object' ? (function () { try { return JSON.stringify(a); } catch (x) { return String(a); } })() : String(a); }).join(' ')); } catch (x) {} cerr.apply(null, arguments); };
+  // ——— журнал плеера (диагностика перемотки, 22.11): каждая перемотка и события звука с точным временем —
+  // сколько от команды «перемотать» до «перемотал» (seeked) и до «играет», куда на самом деле встал плеер.
+  (function () {
+    var MLOG = 'pulse.tauritest.media', buf = [], seen = new WeakSet();
+    function mnote(a, ev, extra) {
+      var src = String(a.currentSrc || a.src || ''); src = src.replace(/^.*\/\/(s|a)\//, '').slice(0, 10);
+      buf.push({ ms: Date.now(), ev: ev, src: src, t: +(+a.currentTime || 0).toFixed(2), x: extra || '' });
+      if (buf.length > 300) buf.shift();
+    }
+    setInterval(function () { if (buf.length) try { localStorage.setItem(MLOG, JSON.stringify(buf)); } catch (x) {} }, 1000);
+    function watch(a) {
+      if (seen.has(a)) return; seen.add(a);
+      ['seeking', 'seeked', 'waiting', 'playing', 'stalled', 'canplay', 'loadedmetadata', 'error', 'ended'].forEach(function (ev) { a.addEventListener(ev, function () { mnote(a, ev, ev === 'error' && a.error ? 'код ' + a.error.code : ''); }); });
+    }
+    try {
+      var d = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'currentTime');
+      Object.defineProperty(HTMLMediaElement.prototype, 'currentTime', { configurable: true, enumerable: d.enumerable, get: d.get,
+        set: function (v) { watch(this); mnote(this, 'перемотать', '→ ' + (+v).toFixed(2)); d.set.call(this, v); } });
+      var pl = HTMLMediaElement.prototype.play;
+      HTMLMediaElement.prototype.play = function () { watch(this); mnote(this, 'play()'); return pl.apply(this, arguments); };
+    } catch (x) { enote('media', 'журнал плеера не включился: ' + x); }
+  })();
   setInterval(function () { try { localStorage.setItem('pulse.tauritest.alive', JSON.stringify({ t: Date.now(), page: location.hash || location.pathname, nodes: document.body ? document.body.getElementsByTagName('*').length : 0 })); } catch (x) {} }, 1000);
 
   var T = window.__TAURI__;

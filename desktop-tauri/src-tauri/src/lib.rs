@@ -172,6 +172,10 @@ fn lab_streams() -> Vec<serde_json::Value> {
 #[tauri::command]
 fn lab_ya_log(id: String) -> Vec<yastream::LogRow> { yastream::log_of(&id) }
 
+// последние запросы плеера ко всем трекам Яндекса (диагностика перемотки)
+#[tauri::command]
+fn lab_ya_log_last() -> Vec<yastream::LogRow> { yastream::log_last(150) }
+
 // токен из адреса, на который Яндекс возвращает после входа: «…#access_token=<токен>&token_type=…»
 fn token_from_url(u: &str) -> Option<String> {
     let i = u.find("access_token=")? + "access_token=".len();
@@ -263,7 +267,7 @@ pub fn run() {
                 responder.respond(r);
             });
         })
-        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams, lab_ya_log, ya_add, token_set, ya_login])
+        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams, lab_ya_log, lab_ya_log_last, ya_add, token_set, ya_login])
         .run(tauri::generate_context!())
         .expect("не удалось запустить Пульс (Tauri)");
 }

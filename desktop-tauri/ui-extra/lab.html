@@ -345,9 +345,21 @@
   function errLog() { try { return JSON.parse(localStorage.getItem('pulse.tauritest.errors') || '[]'); } catch (e) { return []; } }
   function alive() { try { return JSON.parse(localStorage.getItem('pulse.tauritest.alive') || 'null'); } catch (e) { return null; } }
   function aliveLine() { var a = alive(); if (!a) return 'окно «Пульса» ещё не открывалось'; var ago = Math.round((Date.now() - a.t) / 1000); return 'окно «Пульса» последний раз отвечало ' + ago + ' с назад (страница ' + a.page + ', элементов на экране: ' + a.nodes + ')'; }
-  $('hlRef').onclick = function () {
+  // журнал перемотки: события плеера в окне «Пульса» + запросы плеера к программе (pulseya://) — на одной шкале
+  function mediaLog() { try { return JSON.parse(localStorage.getItem('pulse.tauritest.media') || '[]'); } catch (e) { return []; } }
+  var lastSeek = [];
+  async function seekTimeline() {
+    var m = mediaLog().map(function (x) { return { ms: x.ms, s: 'плеер  ' + x.ev + ' ' + x.x + ' [t=' + x.t + ' ' + x.src + ']' }; });
+    var r = []; try { r = (await invoke('lab_ya_log_last')).map(function (x) { return { ms: x.at_ms, s: 'запрос ' + x.id.slice(0, 6) + ' «' + x.asked + '» → ' + x.status + ' ' + (x.served || '') + ' ' + Math.round(x.bytes / 1024) + ' КБ за ' + x.ms + ' мс' }; }); } catch (e) {}
+    var all = m.concat(r).sort(function (a, b) { return a.ms - b.ms; });
+    var from = all.length ? all[Math.max(0, all.length - 220)].ms : 0;
+    lastSeek = all.slice(-220).map(function (x) { return '+' + ((x.ms - from) / 1000).toFixed(3) + ' с  ' + x.s; });
+    return lastSeek;
+  }
+  $('hlRef').onclick = async function () {
+    await seekTimeline();
     var l = httpLog(), e = errLog();
-    $('hlLog').textContent = aliveLine() + '\n\nОШИБКИ ОКНА (' + e.length + '):\n' + e.map(function (x) { return x.at + ' [' + x.k + '] ' + x.page + ' — ' + x.m; }).join('\n') + '\n\nЗАПРОСЫ К ЯНДЕКСУ (' + l.length + '):\n' + l.map(hlLine).join('\n');
+    $('hlLog').textContent = aliveLine() + '\n\nОШИБКИ ОКНА (' + e.length + '):\n' + e.map(function (x) { return x.at + ' [' + x.k + '] ' + x.page + ' — ' + x.m; }).join('\n') + '\n\nЗАПРОСЫ К ЯНДЕКСУ (' + l.length + '):\n' + l.map(hlLine).join('\n') + '\n\nПЕРЕМОТКА: ПЛЕЕР И ЗАПРОСЫ (' + lastSeek.length + '):\n' + lastSeek.join('\n');
     $('hlSt').textContent = 'Ошибок: ' + e.length + ', запросов: ' + l.length;
   };
   $('hlClr').onclick = function () { try { localStorage.removeItem('pulse.tauritest.httplog'); localStorage.removeItem('pulse.tauritest.errors'); } catch (e) {} $('hlLog').textContent = ''; $('hlSt').textContent = 'Очищено'; };
@@ -657,6 +669,7 @@
       ].join('\n');
     };
     var el = errLog(); L.push(''); L.push('— ЭТАП 4: ОКНО «ПУЛЬСА»: ' + aliveLine()); L.push('Ошибки окна (' + el.length + '):'); el.forEach(function (x) { L.push('   ' + x.at + ' [' + x.k + '] ' + x.page + ' — ' + x.m); });
+    L.push(''); L.push('— ЭТАП 4: ПЕРЕМОТКА — ПЛЕЕР И ЗАПРОСЫ (' + lastSeek.length + ', нажмите «Обновить» в разделе «Этап 4» перед отчётом)'); lastSeek.forEach(function (x) { L.push('   ' + x); });
     var hl = httpLog(); L.push(''); L.push('— ЭТАП 4: ЗАПРОСЫ К ЯНДЕКСУ' + (hl.length ? ' (' + hl.length + ')' : ': пусто')); hl.forEach(function (x) { L.push('   ' + hlLine(x)); });
     L.push(''); L.push('— ДИАГНОСТИКА ЗАПУСКА' + (R.diag.length ? '' : ': не проверяли'));
     R.diag.forEach(function (r) {
@@ -676,7 +689,7 @@
     L.push(''); L.push('— ЖУРНАЛ'); L.push(R.logs.join('\n'));
     return L.join('\n');
   }
-  $('mkRep').onclick = function () { $('rep').value = report(); $('repSt').textContent = 'Готово'; };
+  $('mkRep').onclick = async function () { await seekTimeline(); $('rep').value = report(); $('repSt').textContent = 'Готово'; };
   $('copyRep').onclick = async function () {
     if (!$('rep').value) $('rep').value = report();
     try { await navigator.clipboard.writeText($('rep').value); $('repSt').textContent = 'Скопировано'; }
