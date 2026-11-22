@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "lab",
+  "description": "Только окно «Лаборатория звука» может вызывать команды программы. Окно интерфейса «Пульса» (main) в тестовой сборке доступа к системе не получает вовсе.",
+  "windows": ["lab"],
+  "permissions": ["core:default", "allow-lab"]
+}

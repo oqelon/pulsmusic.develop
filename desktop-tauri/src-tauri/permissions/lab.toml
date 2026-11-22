@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-lab"
+description = "Команды тестового окна «Лаборатория звука»: выбрать свои файлы, сохранить отчёт, сведения о системе, открыть интерфейс с демо-данными."
+commands.allow = ["pick_files", "save_report", "env_info", "open_ui"]

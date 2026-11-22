@@ -1,0 +1,63 @@
+# Тестовая сборка «Пульса» на Tauri 2 (миграция, этап 2): macOS Apple Silicon.
+# Работает только в ветке tauri-migration. Выпускает ПРЕДВАРИТЕЛЬНЫЙ релиз tauri-test-<номер> —
+# сайт и обновления Electron-версии смотрят только на «последний» релиз (releases/latest) и его не видят.
+name: Tauri — тестовая сборка для Mac
+on:
+  workflow_dispatch:
+  push:
+    branches: [tauri-migration]
+    paths: ['desktop-tauri/**', '.github/workflows/tauri-test.yml']
+permissions:
+  contents: write
+concurrency: tauri-test
+jobs:
+  mac-arm64:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add aarch64-apple-darwin
+          rustc --version; uname -m
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop-tauri/src-tauri -> target
+      - name: Интерфейс 0.38.0 + лаборатория
+        run: bash desktop-tauri/prepare-ui.sh 0.38.0
+      - name: Сборка
+        working-directory: desktop-tauri
+        env:
+          CI: 'true'
+        run: npx --yes @tauri-apps/cli@2 build --target aarch64-apple-darwin --bundles app,dmg --ci
+      - name: Упаковка
+        id: pk
+        run: |
+          B=desktop-tauri/src-tauri/target/aarch64-apple-darwin/release/bundle
+          ls -la "$B/macos" "$B/dmg" || true
+          APP="$(ls -d "$B"/macos/*.app | head -1)"
+          mkdir -p out
+          ditto -c -k --keepParent "$APP" out/Pulse-Tauri-Test-Mac-Apple-M.zip
+          DMG="$(ls "$B"/dmg/*.dmg 2>/dev/null | head -1 || true)"
+          [ -n "$DMG" ] && cp "$DMG" out/Pulse-Tauri-Test-Mac-Apple-M.dmg
+          codesign -dv --verbose=2 "$APP" 2>&1 | head -20 || true
+          du -sh "$APP" out/*
+          echo "app_mb=$(du -sm "$APP" | cut -f1)" >> "$GITHUB_OUTPUT"
+      - name: Предварительный релиз
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="tauri-test-${{ github.run_number }}"
+          cat > notes.md <<EOF
+          ТЕСТОВАЯ сборка «Пульса» на Tauri 2 — только для проверки звука на Mac (Apple Silicon). Не для обычного использования.
+
+          • Ставится отдельно от обычного «Пульса» и его данные (лайки, плейлисты, токен) не видит и не меняет.
+          • Внутри: «Лаборатория звука» и интерфейс 0.38.0 с демо-треками (без Яндекса).
+          • Программа не подписана Apple: первый запуск — правый клик → «Открыть», либо в Терминале: xattr -cr "/Applications/Pulse Tauri Test.app"
+          • Размер программы: ${{ steps.pk.outputs.app_mb }} МБ. Коммит ${{ github.sha }}.
+          EOF
+          gh release create "$TAG" out/* --prerelease --latest=false --target "${{ github.sha }}" --title "Tauri тест №${{ github.run_number }} (Mac)" --notes-file notes.md

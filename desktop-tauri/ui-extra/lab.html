@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Пульс на Tauri — проверка звука</title>
+<style>
+  :root { --bg:#0a0a0a; --card:#141414; --line:#262626; --ink:#f2f2f2; --mute:#9a9a9a; --acc:#c6ff3d; --on-acc:#0a0a0a; --ok:#3ddc84; --bad:#ff5a5f; --warn:#ffb020; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  body { padding:32px; max-width:1180px; margin:0 auto; }
+  h1 { font-size:30px; line-height:1.1; margin:0 0 4px; font-weight:800; letter-spacing:-.01em; }
+  h2 { font-size:19px; margin:0 0 4px; font-weight:750; }
+  p { margin:0; }
+  .sub { color:var(--mute); }
+  .env { color:var(--mute); font:12px/1.5 ui-monospace, Menlo, monospace; margin-top:8px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:20px; padding:20px; margin-top:16px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:12px; }
+  button { font:inherit; font-weight:650; border:0; border-radius:999px; padding:9px 16px; background:#262626; color:var(--ink); cursor:pointer; }
+  button:hover { background:#333; }
+  button.acc { background:var(--acc); color:var(--on-acc); }
+  button.acc:hover { filter:brightness(1.08); }
+  button:disabled { opacity:.45; cursor:default; }
+  button.sm { padding:5px 11px; font-size:13px; }
+  table { width:100%; border-collapse:collapse; margin-top:12px; font-size:13px; }
+  th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--mute); font-weight:600; white-space:nowrap; }
+  td.c { text-align:center; white-space:nowrap; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); } .warn { color:var(--warn); } .mute { color:var(--mute); }
+  .kv { display:grid; grid-template-columns:260px 1fr; gap:4px 16px; margin-top:12px; font-size:14px; }
+  .kv div:nth-child(odd) { color:var(--mute); }
+  .log { margin-top:12px; background:#0d0d0d; border:1px solid var(--line); border-radius:12px; padding:10px 12px; font:12px/1.5 ui-monospace, Menlo, monospace; max-height:180px; overflow:auto; white-space:pre-wrap; color:#cfcfcf; }
+  .log:empty { display:none; }
+  .chk { display:grid; grid-template-columns:1fr auto 220px; gap:8px 12px; align-items:center; margin-top:12px; }
+  .chk .q { font-size:14px; }
+  .chk .q small { display:block; color:var(--mute); font-size:12px; }
+  .tri button { padding:5px 10px; font-size:13px; }
+  .tri button.on.y { background:var(--ok); color:#000; } .tri button.on.n { background:var(--bad); color:#000; } .tri button.on.s { background:#555; }
+  input[type=text], select { font:inherit; font-size:13px; background:#0d0d0d; color:var(--ink); border:1px solid var(--line); border-radius:10px; padding:6px 10px; width:100%; }
+  select { width:auto; min-width:260px; }
+  textarea { width:100%; min-height:220px; margin-top:12px; background:#0d0d0d; color:#ddd; border:1px solid var(--line); border-radius:12px; padding:12px; font:12px/1.5 ui-monospace, Menlo, monospace; }
+  .big { font-size:22px; font-weight:800; }
+  .note { margin-top:10px; font-size:13px; color:var(--mute); }
+  .pill { display:inline-block; padding:2px 9px; border-radius:999px; background:#222; font-size:12px; }
+  .hero { display:flex; justify-content:space-between; gap:16px; align-items:flex-end; flex-wrap:wrap; }
+</style>
+</head>
+<body>
+<div class="hero">
+  <div>
+    <h1>Проверка звука на Tauri</h1>
+    <p class="sub">Тестовая сборка «Пульса». Ваш обычный «Пульс», его лайки, плейлисты и токен она не видит и не меняет.</p>
+    <div class="env" id="env">…</div>
+  </div>
+  <button class="acc" id="openUi">Открыть интерфейс «Пульса» (демо-треки)</button>
+</div>
+
+<section>
+  <h2>1. Форматы</h2>
+  <p class="sub">14 файлов по 10 секунд. Каждый тихо проиграется около 4 секунд с перемоткой — наденьте наушники или убавьте громкость. Займёт около двух минут.</p>
+  <div class="row"><button class="acc" id="runAll">Проверить все форматы</button><span id="runSt" class="mute"></span></div>
+  <table id="tbl"><thead><tr>
+    <th>Файл</th><th title="canPlayType: что движок обещает">Обещает</th><th>Открылся</th><th>Играет</th><th>Перемотка 50% / 90%</th><th title="Звук проходит через Web Audio — нужно для эквалайзера, лимитера и живого фона">Через эквалайзер</th><th title="Схема pulsetest:// отдаёт кусок файла по запросу Range">Кусками</th><th title="Web Audio может сам раскодировать файл (запасной путь)">Раскодирует</th>
+  </tr></thead><tbody></tbody></table>
+</section>
+
+<section>
+  <h2>2. Звуковая система</h2>
+  <div class="kv" id="sys"></div>
+  <div class="row">
+    <button id="eqTest">Проверить эквалайзер</button>
+    <button id="volTest">Громкость при включённом эквалайзере</button>
+    <button id="xfTest">Плавный переход (кроссфейд)</button>
+    <button id="stopAll">Остановить всё</button>
+  </div>
+  <div class="row" id="sinkRow" style="display:none">
+    <select id="sinkSel"></select>
+    <button id="sinkPlay">Сыграть на выбранном устройстве</button>
+  </div>
+  <div class="log" id="sysLog"></div>
+</section>
+
+<section>
+  <h2>3. Фоновое воспроизведение и медиаклавиши</h2>
+  <p class="sub">Нажмите «Начать», затем сверните окно (или перейдите в другую программу) минимум на 30 секунд и вернитесь. Пока играет — понажимайте медиаклавиши (F7–F9), кнопки наушников и «Пункт управления» → «Сейчас играет».</p>
+  <div class="row"><button class="acc" id="bgStart">Начать</button><button id="bgStop" disabled>Закончить</button><span class="big" id="bgNow"></span></div>
+  <div class="log" id="bgLog"></div>
+</section>
+
+<section>
+  <h2>4. Ваши файлы</h2>
+  <p class="sub">Выберите свою музыку (FLAC, ALAC, Hi-Res, OGG, Opus…). Программа узнает только имена выбранных файлов, ничего не копирует и никуда не отправляет.</p>
+  <div class="row"><button id="pick">Выбрать файлы</button><span id="pickSt" class="mute"></span></div>
+  <table id="utbl" style="display:none"><thead><tr>
+    <th>Файл</th><th>Обещает</th><th>Открылся</th><th>Играет</th><th>Перемотка 50% / 90%</th><th>Через эквалайзер</th><th>Кусками</th><th>Раскодирует</th><th></th>
+  </tr></thead><tbody></tbody></table>
+</section>
+
+<section>
+  <h2>5. Ручная проверка</h2>
+  <p class="sub">Это то, что автоматически не проверить. Отметьте каждое: ✓ работает, ✗ не работает, «—» не проверял(а). Комментарий — по желанию.</p>
+  <div class="chk" id="chk"></div>
+</section>
+
+<section>
+  <h2>6. Отчёт</h2>
+  <p class="sub">Соберите отчёт и пришлите его мне файлом или текстом. Личных данных в нём нет: только версия системы, результаты и ваши отметки.</p>
+  <div class="row"><button class="acc" id="mkRep">Собрать отчёт</button><button id="copyRep">Скопировать</button><button id="saveRep">Сохранить в файл</button><span id="repSt" class="mute"></span></div>
+  <textarea id="rep" readonly placeholder="Здесь появится отчёт"></textarea>
+</section>
+
+<script>
+(function () {
+  'use strict';
+  var T = window.__TAURI__ || null;
+  var invoke = T && T.core && T.core.invoke ? T.core.invoke : function () { return Promise.reject(new Error('нет связи с программой')); };
+  var WIN = /Windows/.test(navigator.userAgent);
+  var BASE = WIN ? 'http://pulsetest.localhost' : 'pulsetest://localhost';
+  var $ = function (id) { return document.getElementById(id); };
+  var sleep = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
+  var started = new Date();
+  var R = { env: null, sys: {}, formats: [], user: [], eq: null, vol: null, xf: null, sink: null, bg: null, keys: [], manual: {}, logs: [] };
+
+  var FILES = [
+    ['flac-16-44.flac', 'audio/flac', 'FLAC 16/44,1'],
+    ['flac-24-96.flac', 'audio/flac', 'FLAC 24/96'],
+    ['flac-24-192.flac', 'audio/flac', 'FLAC 24/192'],
+    ['flac-in-mp4.m4a', 'audio/mp4; codecs="flac"', 'FLAC в MP4 (так отдаёт Яндекс)'],
+    ['alac-16-44.m4a', 'audio/mp4; codecs="alac"', 'ALAC 16/44,1'],
+    ['mp3-320.mp3', 'audio/mpeg', 'MP3 320'],
+    ['aac-256.m4a', 'audio/mp4; codecs="mp4a.40.2"', 'AAC 256'],
+    ['ogg-vorbis.ogg', 'audio/ogg; codecs="vorbis"', 'OGG Vorbis'],
+    ['opus.opus', 'audio/ogg; codecs="opus"', 'Opus в OGG'],
+    ['webm-opus.webm', 'audio/webm; codecs="opus"', 'Opus в WebM'],
+    ['webm-vorbis.webm', 'audio/webm; codecs="vorbis"', 'Vorbis в WebM'],
+    ['wav-16-44.wav', 'audio/wav', 'WAV 16/44,1'],
+    ['wav-24-96.wav', 'audio/wav', 'WAV 24/96'],
+    ['wavpack.wv', 'audio/x-wavpack', 'WavPack (не поддерживался и в Electron)'],
+  ];
+  var MIME = { flac: 'audio/flac', mp3: 'audio/mpeg', m4a: 'audio/mp4', m4b: 'audio/mp4', aac: 'audio/mp4', mp4: 'audio/mp4', alac: 'audio/mp4', ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg; codecs="opus"', webm: 'audio/webm', weba: 'audio/webm', wav: 'audio/wav', aif: 'audio/aiff', aiff: 'audio/aiff', caf: 'audio/x-caf', wv: 'audio/x-wavpack', ape: 'audio/x-ape' };
+
+  function log(el, s) { var t = ((Date.now() - started) / 1000).toFixed(1); var line = '[' + t + ' с] ' + s; R.logs.push(line); var L = $(el); L.textContent += line + '\n'; L.scrollTop = 1e9; }
+  function mark(v, txt) { return '<span class="' + (v === true ? 'ok' : v === false ? 'bad' : v === 'warn' ? 'warn' : 'mute') + '" title="' + (txt || '').replace(/"/g, '&quot;') + '">' + (v === true ? '✓' : v === false ? '✗' : v === 'warn' ? '~' : '—') + '</span>'; }
+  function wait(el, ok, bad, ms) {
+    return new Promise(function (res, rej) {
+      var to = setTimeout(function () { done(); rej(new Error('нет ответа за ' + (ms / 1000) + ' с')); }, ms);
+      var a = function () { done(); res(); };
+      var b = function () { done(); rej(new Error(el.error ? 'код ' + el.error.code + (el.error.message ? ' ' + el.error.message : '') : 'ошибка')); };
+      function done() { clearTimeout(to); el.removeEventListener(ok, a); if (bad) el.removeEventListener(bad, b); }
+      el.addEventListener(ok, a); if (bad) el.addEventListener(bad, b);
+    });
+  }
+
+  // ——— общий AudioContext (создаём по нажатию — иначе система не даст звук)
+  var ctx = null;
+  function getCtx() {
+    if (!ctx) { var C = window.AudioContext || window.webkitAudioContext; ctx = new C(); }
+    if (ctx.state !== 'running') ctx.resume().catch(function () {});
+    return ctx;
+  }
+  function rmsOf(an) { var b = new Float32Array(an.fftSize); an.getFloatTimeDomainData(b); var s = 0; for (var i = 0; i < b.length; i++) s += b[i] * b[i]; return Math.sqrt(s / b.length); }
+  async function measure(an, ms) { var mx = 0, sum = 0, n = 0, t0 = performance.now(); while (performance.now() - t0 < ms) { var r = rmsOf(an); mx = Math.max(mx, r); sum += r; n++; await sleep(50); } return { max: mx, avg: n ? sum / n : 0 }; }
+
+  // ——— одна проверка файла
+  async function testOne(url, mime) {
+    var r = { url: url, can: '', load: null, play: null, seek: null, wa: null, range: null, decode: null, blob: null };
+    var a = new Audio(); a.crossOrigin = 'anonymous'; a.preload = 'auto';
+    r.can = a.canPlayType(mime) || 'нет';
+    var c = getCtx(), src = null, an = null, out = null;
+    try {
+      a.src = url;
+      await wait(a, 'loadedmetadata', 'error', 10000);
+      r.load = { ok: true, dur: +a.duration.toFixed(2) };
+    } catch (e) { r.load = { ok: false, err: e.message }; }
+    if (r.load.ok) {
+      try {
+        src = c.createMediaElementSource(a); an = c.createAnalyser(); an.fftSize = 2048; out = c.createGain(); out.gain.value = 0.25;
+        src.connect(an); an.connect(out); out.connect(c.destination);
+      } catch (e) { r.wa = { ok: false, err: 'не подключился: ' + e.message }; a.volume = 0.25; }
+      try {
+        await a.play();
+        await sleep(1600);
+        var t1 = a.currentTime;
+        r.play = { ok: t1 > 0.6, t: +t1.toFixed(2) };
+        if (an) { var m = await measure(an, 500); r.wa = { ok: m.max > 0.002, rms: +m.max.toFixed(4), note: m.max > 0.002 ? '' : 'тишина: звук не проходит через Web Audio (CORS или движок)' }; }
+        var sk = [];
+        for (var k of [0.5, 0.9]) {
+          var want = a.duration * k; var tt = performance.now();
+          a.currentTime = want;
+          try { await wait(a, 'seeked', 'error', 6000); } catch (e) { sk.push({ k: k, ok: false, err: e.message }); continue; }
+          var ms = Math.round(performance.now() - tt);
+          await sleep(500);
+          sk.push({ k: k, ok: Math.abs(a.currentTime - want) < 1.2 && !a.paused, at: +a.currentTime.toFixed(2), ms: ms });
+        }
+        r.seek = sk;
+      } catch (e) { r.play = { ok: false, err: (e.name || '') + ' ' + e.message }; }
+      a.pause();
+    }
+    try { if (src) src.disconnect(); if (an) an.disconnect(); if (out) out.disconnect(); } catch (e) {}
+    a.removeAttribute('src'); a.load();
+    // запрос куска файла (так плеер получает Яндекс и свои файлы)
+    try {
+      var rs = await fetch(url, { headers: { Range: 'bytes=0-99' } });
+      var bl = (await rs.arrayBuffer()).byteLength;
+      r.range = { ok: rs.status === 206 && bl === 100, status: rs.status, bytes: bl, cr: rs.headers.get('content-range') };
+    } catch (e) { r.range = { ok: false, err: e.message }; }
+    // Web Audio раскодирует сам?
+    try {
+      var buf = await (await fetch(url)).arrayBuffer();
+      if (buf.byteLength > 80 * 1024 * 1024) r.decode = { ok: null, err: 'файл больше 80 МБ — пропущено' };
+      else {
+        var ab = await new Promise(function (res, rej) { var p = c.decodeAudioData(buf, res, rej); if (p && p.then) p.then(res, rej); });
+        r.decode = { ok: true, sr: ab.sampleRate, ch: ab.numberOfChannels, dur: +ab.duration.toFixed(2) };
+      }
+    } catch (e) { r.decode = { ok: false, err: (e && e.message) || 'не раскодировал' }; }
+    // если не открылся по ссылке — пробуем через Blob (запасной путь)
+    if (!r.load.ok) {
+      try {
+        var b2 = await (await fetch(url)).blob(); var u2 = URL.createObjectURL(new Blob([b2], { type: mime.split(';')[0] }));
+        var a2 = new Audio(); a2.src = u2; await wait(a2, 'loadedmetadata', 'error', 8000);
+        r.blob = { ok: true }; URL.revokeObjectURL(u2);
+      } catch (e) { r.blob = { ok: false, err: e.message }; }
+    }
+    return r;
+  }
+  function rowHtml(name, r, extra) {
+    var sk = r.seek ? r.seek.map(function (s) { return mark(s.ok, s.ok ? (s.at + ' с, ' + s.ms + ' мс') : (s.err || 'не туда: ' + s.at)); }).join(' ') : mark(null);
+    var loadT = r.load.ok ? r.load.dur + ' с' : r.load.err + (r.blob ? (r.blob.ok ? ' · через Blob открылся' : ' · через Blob тоже нет') : '');
+    return '<td>' + name + '</td>' +
+      '<td class="c ' + (r.can === 'probably' ? 'ok' : r.can === 'maybe' ? 'warn' : 'bad') + '">' + ({ probably: 'да', maybe: 'может', 'нет': 'нет' }[r.can] || r.can) + '</td>' +
+      '<td class="c">' + mark(r.load.ok ? true : (r.blob && r.blob.ok ? 'warn' : false), loadT) + '</td>' +
+      '<td class="c">' + mark(r.play ? r.play.ok : null, r.play ? (r.play.err || r.play.t + ' с за 1,6 с') : '') + '</td>' +
+      '<td class="c">' + sk + '</td>' +
+      '<td class="c">' + mark(r.wa ? r.wa.ok : null, r.wa ? (r.wa.err || r.wa.note || 'RMS ' + r.wa.rms) : '') + '</td>' +
+      '<td class="c">' + mark(r.range ? r.range.ok : null, r.range ? (r.range.err || r.range.status + ', ' + r.range.bytes + ' байт, ' + (r.range.cr || 'без Content-Range')) : '') + '</td>' +
+      '<td class="c">' + mark(r.decode ? r.decode.ok : null, r.decode ? (r.decode.err || r.decode.sr + ' Гц, ' + r.decode.ch + ' кан.') : '') + '</td>' + (extra || '');
+  }
+
+  $('runAll').onclick = async function () {
+    var btn = this; btn.disabled = true; getCtx();
+    var tb = document.querySelector('#tbl tbody'); tb.innerHTML = ''; R.formats = [];
+    for (var i = 0; i < FILES.length; i++) {
+      var f = FILES[i]; $('runSt').textContent = (i + 1) + ' из ' + FILES.length + ': ' + f[2];
+      var tr = document.createElement('tr'); tr.innerHTML = '<td>' + f[2] + '</td><td colspan="7" class="mute">проверяю…</td>'; tb.appendChild(tr);
+      var r = await testOne(BASE + '/test/' + f[0], f[1]); r.file = f[0]; r.name = f[2];
+      R.formats.push(r); tr.innerHTML = rowHtml(f[2], r);
+    }
+    var good = R.formats.filter(function (r) { return r.play && r.play.ok; }).length;
+    $('runSt').textContent = 'Готово: играют ' + good + ' из ' + FILES.length + '. Наведите на значок — будет подробность.';
+    btn.disabled = false;
+  };
+
+  // ——— звуковая система
+  var playing = [];
+  function stopAll() { playing.forEach(function (a) { try { a.pause(); } catch (e) {} }); playing = []; }
+  $('stopAll').onclick = stopAll;
+
+  async function sysInfo() {
+    var C = window.AudioContext || window.webkitAudioContext;
+    var c = C ? new C() : null;
+    R.sys = {
+      audioContext: !!C,
+      sampleRate: c ? c.sampleRate : null,
+      baseLatency: c && c.baseLatency != null ? +(c.baseLatency * 1000).toFixed(1) : null,
+      outputLatency: c && c.outputLatency != null ? +(c.outputLatency * 1000).toFixed(1) : null,
+      sinkOnElement: 'setSinkId' in HTMLMediaElement.prototype,
+      sinkOnContext: !!(C && 'setSinkId' in C.prototype),
+      mediaSession: 'mediaSession' in navigator,
+      mediaDevices: !!(navigator.mediaDevices && navigator.mediaDevices.enumerateDevices),
+      outputs: null, userAgent: navigator.userAgent,
+    };
+    if (c) try { c.close(); } catch (e) {}
+    if (R.sys.mediaDevices) {
+      try { var l = await navigator.mediaDevices.enumerateDevices(); var o = l.filter(function (d) { return d.kind === 'audiooutput'; }); R.sys.outputs = o.map(function (d) { return d.label || '(без названия)'; }); R.sys.outputIds = o.map(function (d) { return d.deviceId; }); } catch (e) { R.sys.outputs = 'ошибка: ' + e.message; }
+    }
+    var yes = function (v) { return v ? '<span class="ok">есть</span>' : '<span class="bad">нет</span>'; };
+    $('sys').innerHTML =
+      '<div>Частота дискретизации Web Audio</div><div>' + (R.sys.sampleRate ? R.sys.sampleRate + ' Гц' : '—') + '</div>' +
+      '<div>Задержка (base / output)</div><div>' + (R.sys.baseLatency != null ? R.sys.baseLatency + ' мс' : '—') + ' / ' + (R.sys.outputLatency != null ? R.sys.outputLatency + ' мс' : '—') + '</div>' +
+      '<div>Выбор устройства для плеера (setSinkId)</div><div>' + yes(R.sys.sinkOnElement) + '</div>' +
+      '<div>Выбор устройства для эквалайзера</div><div>' + yes(R.sys.sinkOnContext) + '</div>' +
+      '<div>Список устройств вывода</div><div>' + (Array.isArray(R.sys.outputs) ? (R.sys.outputs.length ? R.sys.outputs.length + ': ' + R.sys.outputs.join(', ') : '<span class="bad">пусто</span>') : (R.sys.outputs || '<span class="bad">недоступен</span>')) + '</div>' +
+      '<div>«Сейчас играет» / медиаклавиши (Media Session)</div><div>' + yes(R.sys.mediaSession) + '</div>';
+    if (R.sys.sinkOnElement && Array.isArray(R.sys.outputIds) && R.sys.outputIds.length) {
+      $('sinkRow').style.display = '';
+      $('sinkSel').innerHTML = R.sys.outputIds.map(function (id, i) { return '<option value="' + id + '">' + (R.sys.outputs[i] || id) + '</option>'; }).join('');
+    }
+  }
+
+  // эквалайзер: та же цепочка, что в «Пульсе» (низкие +12 дБ) — громкость низов должна заметно вырасти
+  $('eqTest').onclick = async function () {
+    stopAll(); var c = getCtx();
+    var a = new Audio(); a.crossOrigin = 'anonymous'; a.loop = true; a.src = BASE + '/test/flac-16-44.flac'; playing.push(a);
+    try {
+      var src = c.createMediaElementSource(a), eq = c.createBiquadFilter(), an = c.createAnalyser(), out = c.createGain();
+      eq.type = 'lowshelf'; eq.frequency.value = 1000; eq.gain.value = 0; out.gain.value = 0.2; an.fftSize = 2048;
+      src.connect(eq); eq.connect(an); an.connect(out); out.connect(c.destination);
+      await a.play(); await sleep(700);
+      var m0 = await measure(an, 1500); log('sysLog', 'Эквалайзер 0 дБ: RMS ' + m0.avg.toFixed(4));
+      eq.gain.value = 12; await sleep(300);
+      var m1 = await measure(an, 1500); log('sysLog', 'Эквалайзер +12 дБ: RMS ' + m1.avg.toFixed(4));
+      var k = m0.avg > 0 ? m1.avg / m0.avg : 0;
+      R.eq = { ok: k > 1.8, ratio: +k.toFixed(2), rms0: +m0.avg.toFixed(4), rms12: +m1.avg.toFixed(4) };
+      log('sysLog', R.eq.ok ? '✓ Эквалайзер работает: громче в ' + R.eq.ratio + ' раза' : '✗ Эквалайзер не меняет звук (в ' + R.eq.ratio + ' раза)');
+    } catch (e) { R.eq = { ok: false, err: e.message }; log('sysLog', '✗ Эквалайзер: ' + e.message); }
+    a.pause();
+  };
+
+  // громкость: в «Пульсе» ползунок громкости и кроссфейд меняют audio.volume, а звук при этом идёт через эквалайзер.
+  // В Chromium это работает; в WebKit — надо проверить.
+  $('volTest').onclick = async function () {
+    stopAll(); var c = getCtx();
+    var a = new Audio(); a.crossOrigin = 'anonymous'; a.loop = true; a.src = BASE + '/test/flac-16-44.flac'; playing.push(a);
+    try {
+      var src = c.createMediaElementSource(a), an = c.createAnalyser(), out = c.createGain(); out.gain.value = 0.2; an.fftSize = 2048;
+      src.connect(an); an.connect(out); out.connect(c.destination);
+      a.volume = 1; await a.play(); await sleep(700);
+      var m1 = await measure(an, 1200);
+      a.volume = 0.25; await sleep(300);
+      var m2 = await measure(an, 1200);
+      var k = m1.avg > 0 ? m2.avg / m1.avg : 1;
+      var rb = (a.volume = 0.37, a.volume);
+      R.vol = { ok: k < 0.5, ratio: +k.toFixed(2), readBack: rb };
+      log('sysLog', 'Громкость 100%: RMS ' + m1.avg.toFixed(4) + ', 25%: RMS ' + m2.avg.toFixed(4));
+      log('sysLog', R.vol.ok ? '✓ Ползунок громкости действует и при эквалайзере' : '✗ При эквалайзере audio.volume не действует (отношение ' + R.vol.ratio + ') — ползунку громкости и кроссфейду в «Пульсе» понадобится другой способ');
+    } catch (e) { R.vol = { ok: false, err: e.message }; log('sysLog', '✗ Громкость: ' + e.message); }
+    a.pause();
+  };
+
+  // кроссфейд: так же, как в «Пульсе» — два плеера, громкость одного плавно уходит, другого приходит
+  $('xfTest').onclick = async function () {
+    stopAll();
+    var A = new Audio(BASE + '/test/flac-16-44.flac'), B = new Audio(BASE + '/test/mp3-320.mp3');
+    A.loop = B.loop = true; playing.push(A, B); A.volume = 0.3; B.volume = 0;
+    try {
+      await A.play(); log('sysLog', 'Кроссфейд: играет первый трек…'); await sleep(2500);
+      await B.play(); log('sysLog', 'Кроссфейд: плавный переход 4 с…');
+      var t0 = performance.now(), T = 4000, jumps = 0, last = performance.now();
+      await new Promise(function (res) {
+        (function step() {
+          var now = performance.now(); if (now - last > 120) jumps++; last = now;
+          var k = Math.min(1, (now - t0) / T);
+          A.volume = 0.3 * Math.cos(k * Math.PI / 2); B.volume = 0.3 * Math.sin(k * Math.PI / 2);
+          if (k < 1) requestAnimationFrame(step); else res();
+        })();
+      });
+      R.xf = { ran: true, frameGaps: jumps, endA: +A.volume.toFixed(3), endB: +B.volume.toFixed(3) };
+      log('sysLog', 'Кроссфейд закончен. Слышали плавный переход без щелчков? Отметьте в разделе 5.');
+      await sleep(2000);
+    } catch (e) { R.xf = { ran: false, err: (e.name || '') + ' ' + e.message }; log('sysLog', '✗ Кроссфейд: ' + e.message); }
+    stopAll();
+  };
+
+  $('sinkPlay').onclick = async function () {
+    stopAll(); var id = $('sinkSel').value, name = $('sinkSel').selectedOptions[0].textContent;
+    var a = new Audio(BASE + '/test/mp3-320.mp3'); a.volume = 0.3; playing.push(a);
+    try { await a.setSinkId(id); await a.play(); R.sink = { ok: true, name: name }; log('sysLog', 'Играет на «' + name + '». Слышно там? Отметьте в разделе 5.'); }
+    catch (e) { R.sink = { ok: false, name: name, err: e.message }; log('sysLog', '✗ Не удалось вывести на «' + name + '»: ' + e.message); }
+  };
+
+  // ——— фон и медиаклавиши
+  var bg = null;
+  $('bgStart').onclick = async function () {
+    if (bg) return; stopAll();
+    var a = new Audio(BASE + '/test/flac-16-44.flac'); a.loop = true; a.volume = 0.25; playing.push(a);
+    bg = { a: a, t0: performance.now(), played: 0, last: 0, hidden: [], hid: null };
+    a.addEventListener('timeupdate', function () {
+      var t = a.currentTime, d = t - bg.last; if (d < 0) d += a.duration || 10; if (d > 0 && d < 3) bg.played += d; bg.last = t;
+    });
+    var vis = function () {
+      var now = performance.now();
+      if (document.hidden) { bg.hid = { at: now, p: bg.played }; log('bgLog', 'Окно скрыто'); }
+      else if (bg.hid) {
+        var w = (now - bg.hid.at) / 1000, p = bg.played - bg.hid.p;
+        bg.hidden.push({ wall: +w.toFixed(1), played: +p.toFixed(1) });
+        log('bgLog', 'Окно снова видно: было скрыто ' + w.toFixed(1) + ' с, за это время проиграно ' + p.toFixed(1) + ' с' + (p > w * 0.9 ? ' ✓' : ' ✗ звук прерывался или останавливался'));
+        bg.hid = null;
+      }
+    };
+    bg.vis = vis; document.addEventListener('visibilitychange', vis);
+    if ('mediaSession' in navigator) {
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({ title: 'Проверка медиаклавиш', artist: 'Пульс на Tauri', album: 'Лаборатория звука' });
+        ['play', 'pause', 'previoustrack', 'nexttrack', 'seekbackward', 'seekforward', 'seekto', 'stop'].forEach(function (k) {
+          try { navigator.mediaSession.setActionHandler(k, function (d) { R.keys.push(k); log('bgLog', 'Нажата клавиша: ' + k + (d && d.seekTime != null ? ' (' + d.seekTime.toFixed(1) + ' с)' : '')); if (k === 'play') a.play(); if (k === 'pause') a.pause(); }); } catch (e) { log('bgLog', 'Клавиша ' + k + ' не поддерживается'); }
+        });
+      } catch (e) { log('bgLog', 'Media Session: ' + e.message); }
+    }
+    try { await a.play(); log('bgLog', 'Играет по кругу. Сверните окно на 30+ секунд.'); } catch (e) { log('bgLog', '✗ ' + e.message); }
+    this.disabled = true; $('bgStop').disabled = false;
+    bg.iv = setInterval(function () { var w = (performance.now() - bg.t0) / 1000; $('bgNow').textContent = 'прошло ' + w.toFixed(0) + ' с · проиграно ' + bg.played.toFixed(0) + ' с'; }, 500);
+  };
+  $('bgStop').onclick = function () {
+    if (!bg) return;
+    var w = (performance.now() - bg.t0) / 1000;
+    R.bg = { wall: +w.toFixed(1), played: +bg.played.toFixed(1), hidden: bg.hidden, ok: bg.hidden.length ? bg.hidden.every(function (h) { return h.played > h.wall * 0.9; }) : null };
+    log('bgLog', 'Итого: прошло ' + w.toFixed(1) + ' с, проиграно ' + bg.played.toFixed(1) + ' с. ' + (R.bg.ok == null ? 'Окно не сворачивали — фон не проверен.' : R.bg.ok ? '✓ В фоне играет без перерывов' : '✗ В фоне были перерывы'));
+    clearInterval(bg.iv); document.removeEventListener('visibilitychange', bg.vis); bg.a.pause(); bg = null;
+    $('bgStart').disabled = false; this.disabled = true; $('bgNow').textContent = '';
+  };
+
+  // ——— свои файлы
+  $('pick').onclick = async function () {
+    var btn = this; btn.disabled = true; $('pickSt').textContent = '';
+    try {
+      var list = await invoke('pick_files');
+      if (!list.length) { $('pickSt').textContent = 'Ничего не выбрано'; btn.disabled = false; return; }
+      getCtx(); $('utbl').style.display = ''; var tb = document.querySelector('#utbl tbody');
+      for (var i = 0; i < list.length; i++) {
+        var f = list[i], ext = (f.name.split('.').pop() || '').toLowerCase(), mime = MIME[ext] || 'audio/' + ext;
+        $('pickSt').textContent = (i + 1) + ' из ' + list.length + ': ' + f.name;
+        var tr = document.createElement('tr'); tr.innerHTML = '<td>' + esc(f.name) + '</td><td colspan="8" class="mute">проверяю…</td>'; tb.appendChild(tr);
+        var url = BASE + '/u/' + f.id;
+        var r = await testOne(url, mime); r.name = f.name; r.ext = ext; r.size = f.size; R.user.push(r);
+        tr.innerHTML = rowHtml(esc(f.name) + ' <span class="pill">' + (f.size / 1048576).toFixed(1) + ' МБ</span>', r, '<td><button class="sm" data-u="' + url + '">Слушать</button></td>');
+      }
+      $('pickSt').textContent = 'Готово. «Слушать» — включить файл целиком.';
+    } catch (e) { $('pickSt').textContent = 'Ошибка: ' + e; }
+    btn.disabled = false;
+  };
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-u]'); if (!b) return;
+    stopAll(); var a = new Audio(b.getAttribute('data-u')); a.volume = 0.5; playing.push(a); a.play().catch(function (er) { $('pickSt').textContent = 'Не играет: ' + er.message; });
+  });
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+
+  // ——— ручная проверка
+  var MAN = [
+    ['lab', 'В этом окне звук слышно', 'Проверка форматов и кроссфейд'],
+    ['ui', 'Интерфейс «Пульса» открывается и выглядит как обычно', 'Кнопка вверху справа. Шрифты, цвета, отступы, анимации'],
+    ['ui_play', 'Демо-треки играют в интерфейсе', 'Каждый трек — свой формат (название = формат)'],
+    ['ui_seek', 'Мини-плеер: пауза, перемотка ползунком, следующий/предыдущий', ''],
+    ['ui_eq', 'Эквалайзер в «Пульсе» меняет звук', 'Профиль → Звук → Эквалайзер'],
+    ['ui_xf', 'Плавный переход между треками в «Пульсе»', 'Профиль → Звук → Плавный переход; треки по 10 с — переход виден сразу'],
+    ['ui_vol', 'Ползунок громкости в «Пульсе» работает', 'Особенно при включённом эквалайзере'],
+    ['ui_dev', 'Выбор устройства вывода в «Пульсе» работает', 'Профиль → Звук → Устройство'],
+    ['xf_lab', 'Кроссфейд в лаборатории звучит плавно, без щелчков', 'Раздел 2'],
+    ['sink_lab', 'Звук идёт на выбранное в лаборатории устройство', 'Раздел 2, если список устройств есть'],
+    ['bt', 'При подключении/отключении AirPods (Bluetooth) звук не пропадает', 'Включите трек и переключите вывод в системе'],
+    ['bg', 'Музыка играет в фоне: окно свёрнуто 1+ минуту', 'Раздел 3 и в самом «Пульсе»'],
+    ['keys', 'Медиаклавиши и «Пункт управления» управляют плеером', 'F7–F9, кнопки наушников, «Сейчас играет»'],
+    ['hires', 'FLAC 24/96 и 24/192 звучат чисто, без треска', ''],
+    ['sleep', 'После сна Mac плеер продолжает работать', 'По желанию'],
+  ];
+  $('chk').innerHTML = MAN.map(function (m) {
+    return '<div class="q">' + m[1] + (m[2] ? '<small>' + m[2] + '</small>' : '') + '</div>' +
+      '<div class="tri" data-k="' + m[0] + '"><button class="y">✓</button> <button class="n">✗</button> <button class="s">—</button></div>' +
+      '<input type="text" data-n="' + m[0] + '" placeholder="комментарий">';
+  }).join('');
+  $('chk').addEventListener('click', function (e) {
+    var b = e.target.closest('.tri button'); if (!b) return; var box = b.parentNode, k = box.getAttribute('data-k');
+    box.querySelectorAll('button').forEach(function (x) { x.classList.remove('on'); }); b.classList.add('on');
+    R.manual[k] = Object.assign(R.manual[k] || {}, { v: b.classList.contains('y') ? 'работает' : b.classList.contains('n') ? 'НЕ работает' : 'не проверял' });
+  });
+  $('chk').addEventListener('input', function (e) { var k = e.target.getAttribute('data-n'); if (k) R.manual[k] = Object.assign(R.manual[k] || {}, { note: e.target.value }); });
+
+  // ——— отчёт
+  function yn(v) { return v === true ? 'да' : v === false ? 'НЕТ' : '—'; }
+  function report() {
+    var L = [];
+    L.push('ПУЛЬС НА TAURI — ОТЧЁТ ПРОВЕРКИ ЗВУКА');
+    L.push('Дата: ' + new Date().toLocaleString('ru-RU'));
+    if (R.env) L.push('Система: ' + R.env.os + ' ' + R.env.osVersion + ' (' + R.env.arch + '), сборка ' + R.env.app + ', Tauri ' + R.env.tauri);
+    L.push('Движок: ' + navigator.userAgent);
+    L.push('');
+    L.push('— ЗВУКОВАЯ СИСТЕМА');
+    var s = R.sys;
+    L.push('Web Audio: ' + yn(s.audioContext) + ', ' + s.sampleRate + ' Гц, задержка ' + s.baseLatency + ' / ' + s.outputLatency + ' мс');
+    L.push('setSinkId у плеера: ' + yn(s.sinkOnElement) + '; у Web Audio: ' + yn(s.sinkOnContext));
+    L.push('Устройства вывода: ' + (Array.isArray(s.outputs) ? s.outputs.length + ' — ' + s.outputs.join(', ') : s.outputs));
+    L.push('Media Session: ' + yn(s.mediaSession));
+    L.push('Эквалайзер: ' + (R.eq ? (R.eq.err ? 'ошибка ' + R.eq.err : yn(R.eq.ok) + ' (громче в ' + R.eq.ratio + ' раза)') : 'не проверяли'));
+    L.push('Громкость при эквалайзере: ' + (R.vol ? (R.vol.err ? 'ошибка ' + R.vol.err : yn(R.vol.ok) + ' (отношение ' + R.vol.ratio + ', volume читается как ' + R.vol.readBack + ')') : 'не проверяли'));
+    L.push('Кроссфейд: ' + (R.xf ? (R.xf.ran ? 'выполнен, пропусков кадров ' + R.xf.frameGaps : 'ошибка ' + R.xf.err) : 'не проверяли'));
+    L.push('Вывод на устройство: ' + (R.sink ? (R.sink.ok ? 'да — ' + R.sink.name : 'НЕТ — ' + R.sink.name + ': ' + R.sink.err) : 'не проверяли'));
+    L.push('Фон: ' + (R.bg ? 'прошло ' + R.bg.wall + ' с, проиграно ' + R.bg.played + ' с; скрытия: ' + JSON.stringify(R.bg.hidden) + ' → ' + yn(R.bg.ok) : 'не проверяли'));
+    L.push('Медиаклавиши: ' + (R.keys.length ? R.keys.join(', ') : 'нажатий не было'));
+    var fmt = function (r) {
+      var sk = r.seek ? r.seek.map(function (x) { return x.k * 100 + '% ' + (x.ok ? 'да (' + x.ms + ' мс)' : 'НЕТ ' + (x.err || x.at)); }).join(', ') : '—';
+      return [
+        (r.name || r.file) + (r.size ? ' [' + (r.size / 1048576).toFixed(1) + ' МБ]' : ''),
+        '   обещает: ' + r.can + '; открылся: ' + (r.load.ok ? 'да, ' + r.load.dur + ' с' : 'НЕТ — ' + r.load.err) + (r.blob ? '; через Blob: ' + yn(r.blob.ok) : ''),
+        '   играет: ' + (r.play ? (r.play.ok ? 'да' : 'НЕТ ' + (r.play.err || r.play.t)) : '—') + '; перемотка: ' + sk,
+        '   через эквалайзер: ' + (r.wa ? (r.wa.ok ? 'да (RMS ' + r.wa.rms + ')' : 'НЕТ ' + (r.wa.err || r.wa.note)) : '—') +
+          '; кусками: ' + (r.range ? (r.range.ok ? 'да' : 'НЕТ ' + (r.range.err || r.range.status)) : '—') +
+          '; раскодирует: ' + (r.decode ? (r.decode.ok ? 'да, ' + r.decode.sr + ' Гц' : 'НЕТ ' + (r.decode.err || '')) : '—'),
+      ].join('\n');
+    };
+    L.push(''); L.push('— ТЕСТОВЫЕ ФОРМАТЫ' + (R.formats.length ? '' : ': не проверяли'));
+    R.formats.forEach(function (r) { L.push(fmt(r)); });
+    L.push(''); L.push('— ВАШИ ФАЙЛЫ' + (R.user.length ? '' : ': не выбирали'));
+    R.user.forEach(function (r) { L.push(fmt(r)); });
+    L.push(''); L.push('— РУЧНАЯ ПРОВЕРКА');
+    MAN.forEach(function (m) { var v = R.manual[m[0]] || {}; L.push((v.v ? '[' + v.v + '] ' : '[не отмечено] ') + m[1] + (v.note ? ' — ' + v.note : '')); });
+    L.push(''); L.push('— ЖУРНАЛ'); L.push(R.logs.join('\n'));
+    return L.join('\n');
+  }
+  $('mkRep').onclick = function () { $('rep').value = report(); $('repSt').textContent = 'Готово'; };
+  $('copyRep').onclick = async function () {
+    if (!$('rep').value) $('rep').value = report();
+    try { await navigator.clipboard.writeText($('rep').value); $('repSt').textContent = 'Скопировано'; }
+    catch (e) { $('rep').removeAttribute('readonly'); $('rep').select(); var ok = document.execCommand('copy'); $('rep').setAttribute('readonly', ''); $('repSt').textContent = ok ? 'Скопировано' : 'Выделите текст и нажмите ⌘C'; }
+  };
+  $('saveRep').onclick = async function () {
+    if (!$('rep').value) $('rep').value = report();
+    try { var ok = await invoke('save_report', { text: $('rep').value }); $('repSt').textContent = ok ? 'Сохранено' : 'Отменено'; }
+    catch (e) { $('repSt').textContent = 'Не сохранилось: ' + e; }
+  };
+
+  $('openUi').onclick = function () { invoke('open_ui').catch(function (e) { $('env').textContent = 'Не открылся интерфейс: ' + e; }); };
+
+  invoke('env_info').then(function (v) { R.env = v; $('env').textContent = (v.os === 'macos' ? 'macOS ' : v.os + ' ') + (v.osVersion || '') + ' · ' + v.arch + ' · сборка ' + v.app + ' · Tauri ' + v.tauri; })
+    .catch(function (e) { $('env').textContent = 'Сведения о системе недоступны: ' + e; });
+  sysInfo();
+})();
+</script>
+</body>
+</html>

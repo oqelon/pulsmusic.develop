@@ -1,0 +1,46 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Pulse Tauri Test",
+  "version": "0.38.0",
+  "identifier": "ru.pulse.desktop.tauritest",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "lab",
+        "title": "Пульс на Tauri — проверка звука",
+        "url": "lab.html",
+        "width": 1100,
+        "height": 860,
+        "minWidth": 900,
+        "minHeight": 640,
+        "theme": "Dark",
+        "backgroundColor": "#0A0A0A"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "../lab-media/": "lab-media/"
+    },
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "signingIdentity": "-"
+    }
+  }
+}
