@@ -56,6 +56,13 @@
 </div>
 
 <section>
+  <h2>Опыт: сколько ещё звучит старое место после перемотки</h2>
+  <p class="sub">Тестовый звук, в котором каждая секунда — свой тон (по тону видно, какое место трека сейчас реально звучит). Перематываем и замеряем, через сколько миллисекунд в колонках действительно новое место. Цепочка — как в «Пульсе» (эквалайзер, лимитер). Варианты: как сейчас; другая настройка задержки звука (latencyHint); пауза → перемотка → play. Около минуты, звук — тихие писки.</p>
+  <div class="row"><button class="acc" id="runLag">Замерить</button><span id="lagSt" class="mute"></span></div>
+  <table id="lagtbl"><thead><tr><th>Вариант</th><th>Задержка цепочки (base / output)</th><th>Старое место звучит ещё (по 4 перемоткам)</th><th>В среднем</th></tr></thead><tbody></tbody></table>
+</section>
+
+<section>
   <h2>Опыт: перемотка трека Яндекса</h2>
   <p class="sub">Журнал показал: программа отдаёт звук после перемотки мгновенно (из памяти), плеер сообщает «перемотал» через ~50 мс — а звук идёт через секунду. Здесь проверяем, кто держит секунду и помогают ли другие способы. Сначала включите в «Пульсе» любой трек Яндекса и поставьте на паузу, потом нажмите «Проверить». Займёт около минуты, звук тихий.</p>
   <div class="row"><button class="acc" id="runSeek">Проверить</button><span id="seekSt" class="mute"></span></div>
@@ -150,7 +157,7 @@
   var $ = function (id) { return document.getElementById(id); };
   var sleep = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
   var started = new Date();
-  var R = { env: null, sys: {}, seekx: [], diag: [], opusLong: null, rust: [], formats: [], user: [], eq: null, vol: null, xf: null, sink: null, bg: null, keys: [], manual: {}, logs: [] };
+  var R = { env: null, sys: {}, lag: [], seekx: [], diag: [], opusLong: null, rust: [], formats: [], user: [], eq: null, vol: null, xf: null, sink: null, bg: null, keys: [], manual: {}, logs: [] };
 
   var FILES = [
     ['flac-16-44.flac', 'audio/flac', 'FLAC 16/44,1'],
@@ -370,6 +377,57 @@
     $('hlSt').textContent = 'Ошибок: ' + e.length + ', запросов: ' + l.length;
   };
   $('hlClr').onclick = function () { try { localStorage.removeItem('pulse.tauritest.httplog'); localStorage.removeItem('pulse.tauritest.errors'); } catch (e) {} $('hlLog').textContent = ''; $('hlSt').textContent = 'Очищено'; };
+
+  // ——— опыт: задержка звука после перемотки (тон = секунда трека: 300 + 60·с Гц)
+  function nowSec(an, buf) {
+    an.getFloatFrequencyData(buf);
+    var sr = an.context.sampleRate, n = an.fftSize, lo = Math.floor(250 * n / sr), hi = Math.ceil(2200 * n / sr), bi = lo, bv = -1e9;
+    for (var i = lo; i <= hi; i++) if (buf[i] > bv) { bv = buf[i]; bi = i; }
+    if (bv < -70) return null;
+    return Math.round((bi * sr / n - 300) / 60);
+  }
+  async function lagRun(hint, mode) {
+    var C = window.AudioContext || window.webkitAudioContext;
+    var ctx = new C(hint ? { latencyHint: hint } : undefined); if (ctx.state !== 'running') await ctx.resume().catch(function () {});
+    var a = new Audio(); a.crossOrigin = 'anonymous'; a.preload = 'auto'; a.src = BASE + '/test/seek-tone.m4a';
+    var src = ctx.createMediaElementSource(a), pre = ctx.createGain(); var n = pre; src.connect(pre);
+    [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000].forEach(function (f, i, arr) { var b = ctx.createBiquadFilter(); b.type = i === 0 ? 'lowshelf' : i === arr.length - 1 ? 'highshelf' : 'peaking'; b.frequency.value = f; b.gain.value = 0; n.connect(b); n = b; });
+    var lim = ctx.createDynamicsCompressor(); lim.knee.value = 0; lim.attack.value = 0.002; lim.release.value = 0.12; n.connect(lim);
+    var an = ctx.createAnalyser(); an.fftSize = 8192; an.smoothingTimeConstant = 0; lim.connect(an);
+    var g = ctx.createGain(); g.gain.value = 0.08; an.connect(g); g.connect(ctx.destination);
+    var buf = new Float32Array(an.frequencyBinCount), res = { base: ctx.baseLatency, out: ctx.outputLatency, lags: [] };
+    try {
+      await wait(a, 'canplay', 'error', 10000); await a.play(); await sleep(1500);
+      // ждём, пока звук реально пошёл через цепочку (первый запуск бывает медленным)
+      var w0 = performance.now(); while (nowSec(an, buf) == null && performance.now() - w0 < 6000) await sleep(50);
+      if (nowSec(an, buf) == null) throw new Error('звук не пошёл через цепочку');
+      await sleep(800);
+      for (var tgt of [20, 6, 25, 12]) {
+        var t0 = performance.now(), got = null;
+        if (mode === 'pause') { a.pause(); a.currentTime = tgt + 0.3; await new Promise(function (r) { var f = function () { a.removeEventListener('seeked', f); r(); }; a.addEventListener('seeked', f); setTimeout(r, 2000); }); a.play().catch(function () {}); }
+        else a.currentTime = tgt + 0.3;
+        while (performance.now() - t0 < 3000) { await sleep(8); var sec = nowSec(an, buf); if (sec != null && Math.abs(sec - tgt) <= 1) { got = Math.round(performance.now() - t0); break; } }
+        res.lags.push(got); await sleep(1300);
+      }
+    } catch (e) { res.err = e.message; }
+    a.pause(); a.removeAttribute('src'); a.load(); try { ctx.close(); } catch (e) {}
+    return res;
+  }
+  $('runLag').onclick = async function () {
+    var btn = this; btn.disabled = true; stopAll(); R.lag = [];
+    var tb = document.querySelector('#lagtbl tbody'); tb.innerHTML = '';
+    var V = [['Как в «Пульсе»: latencyHint «playback», перемотка на ходу', 'playback', 'live'], ['latencyHint «interactive», перемотка на ходу', 'interactive', 'live'], ['latencyHint «playback», пауза → перемотка → play', 'playback', 'pause'], ['latencyHint «interactive», пауза → перемотка → play', 'interactive', 'pause']];
+    for (var i = 0; i < V.length; i++) {
+      $('lagSt').textContent = (i + 1) + ' из ' + V.length + ': ' + V[i][0];
+      var r = await lagRun(V[i][1], V[i][2]); r.name = V[i][0]; R.lag.push(r);
+      var ok = r.lags.filter(function (x) { return x != null; }), avg = ok.length ? Math.round(ok.reduce(function (p, x) { return p + x; }, 0) / ok.length) : null;
+      r.avg = avg;
+      var tr = document.createElement('tr');
+      tr.innerHTML = '<td>' + r.name + '</td><td class="c">' + (r.base != null ? (r.base * 1000).toFixed(1) : '—') + ' / ' + (r.out != null ? (r.out * 1000).toFixed(1) : '—') + ' мс</td><td class="c">' + (r.err ? '<span class="bad">' + r.err + '</span>' : r.lags.map(function (x) { return x == null ? '<span class="bad">&gt;3 с</span>' : x + ' мс'; }).join(', ')) + '</td><td class="c ' + (avg == null ? 'bad' : avg < 150 ? 'ok' : avg < 400 ? 'warn' : 'bad') + '">' + (avg == null ? '—' : avg + ' мс') + '</td>';
+      tb.appendChild(tr);
+    }
+    $('lagSt').textContent = 'Готово.'; btn.disabled = false;
+  };
 
   // ——— опыт с перемоткой: настоящий трек Яндекса (уже в памяти программы)
   async function seekProbe(a, an, target, mode) {
@@ -737,6 +795,8 @@
       ].join('\n');
     };
     var el = errLog(); L.push(''); L.push('— ЭТАП 4: ОКНО «ПУЛЬСА»: ' + aliveLine()); L.push('Ошибки окна (' + el.length + '):'); el.forEach(function (x) { L.push('   ' + x.at + ' [' + x.k + '] ' + x.page + ' — ' + x.m); });
+    L.push(''); L.push('— ОПЫТ: СКОЛЬКО ЗВУЧИТ СТАРОЕ МЕСТО ПОСЛЕ ПЕРЕМОТКИ' + (R.lag.length ? '' : ': не проверяли'));
+    R.lag.forEach(function (x) { L.push(x.name + ': ' + (x.err ? 'ошибка ' + x.err : x.lags.map(function (v) { return v == null ? '>3000' : v; }).join(', ') + ' мс, в среднем ' + x.avg + ' мс') + '; задержка цепочки ' + x.base + ' / ' + x.out); });
     L.push(''); L.push('— ОПЫТ: ПЕРЕМОТКА ТРЕКА ЯНДЕКСА' + (R.seekx.length ? '' : ': не проверяли'));
     R.seekx.forEach(function (x) { L.push(x.way + ': seeked ' + x.seeked + ' мс, время пошло ' + x.resumed + ' мс, звук ' + x.sound + ' мс, отскок до ' + x.back + ' с'); x.rows.forEach(function (r) { L.push('   ' + JSON.stringify(r)); }); });
     L.push(''); L.push('— ЭТАП 4: ПЕРЕМОТКА — ПЛЕЕР И ЗАПРОСЫ (' + lastSeek.length + ', нажмите «Обновить» в разделе «Этап 4» перед отчётом)'); lastSeek.forEach(function (x) { L.push('   ' + x); });
