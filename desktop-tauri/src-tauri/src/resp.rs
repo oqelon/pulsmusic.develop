@@ -37,6 +37,15 @@ pub fn resolve(w: Want, len: u64) -> Option<(u64, u64)> {
     }
 }
 
+/// Конец отдаваемого куска: открытый запрос («bytes=a-») — не больше `chunk` (плеер попросит дальше сам);
+/// явный («bytes=a-b», «bytes=-n») — целиком, до 64 МБ: плеер WebKit недостающее не дозапрашивает.
+pub fn cap_end(w: Want, a: u64, b: u64, chunk: u64) -> u64 {
+    match w {
+        Want::From(_, None) => b.min(a + chunk - 1),
+        _ => b.min(a + 64 * 1024 * 1024 - 1),
+    }
+}
+
 pub fn plain(status: StatusCode, msg: &str) -> Response<Vec<u8>> {
     Response::builder()
         .status(status)
@@ -104,6 +113,8 @@ mod tests {
         assert_eq!(resolve(Want::From(10, None), 10), None);
         assert_eq!(resolve(Want::Suffix(4), 10), Some((6, 9)));
         assert_eq!(resolve(Want::Suffix(40), 10), Some((0, 9)));
+        assert_eq!(cap_end(Want::From(0, None), 0, 999, 100), 99);
+        assert_eq!(cap_end(Want::From(0, Some(999)), 0, 999, 100), 999);
     }
     #[test]
     fn uri() {

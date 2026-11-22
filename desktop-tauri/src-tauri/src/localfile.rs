@@ -12,7 +12,7 @@ use tauri::http::{Response, StatusCode};
 
 use crate::resp;
 
-/// За один ответ — не больше 4 МБ: плеер сам попросит следующий кусок.
+/// На открытый запрос («bytes=a-») — не больше 4 МБ: плеер сам попросит следующий кусок. Явный — целиком.
 const CHUNK: u64 = 4 * 1024 * 1024;
 /// Без Range целиком отдаём только небольшие файлы.
 const WHOLE_MAX: u64 = 64 * 1024 * 1024;
@@ -123,7 +123,7 @@ pub fn serve(section: &str, id: &str, range: Option<String>) -> Response<Vec<u8>
     let mut o = match Opened::open(&s) { Ok(o) => o, Err(e) => return resp::plain(StatusCode::NOT_FOUND, &format!("файл не открывается: {e}")) };
     let len = o.len;
     let (start, end, partial) = match range.as_deref().and_then(resp::parse_want) {
-        Some(w) => match resp::resolve(w, len) { Some((a, b)) => (a, b.min(a + CHUNK - 1), true), None => return resp::not_satisfiable(&len.to_string()) },
+        Some(w) => match resp::resolve(w, len) { Some((a, b)) => (a, resp::cap_end(w, a, b, CHUNK), true), None => return resp::not_satisfiable(&len.to_string()) },
         None if len > WHOLE_MAX => (0, CHUNK.min(len).saturating_sub(1), true),
         None => (0, len.saturating_sub(1), false),
     };
@@ -153,6 +153,10 @@ mod tests {
         assert_eq!(r.status(), StatusCode::PARTIAL_CONTENT);
         assert_eq!(r.body().as_slice(), &all[100..200]);
         assert_eq!(r.headers().get(header::CONTENT_RANGE).unwrap().to_str().unwrap(), format!("bytes 100-199/{}", all.len()));
+        let big = std::fs::read(lab("wav-24-96.wav")).unwrap();
+        register("f2", Src::File(lab("wav-24-96.wav")));
+        let r = serve("a", "f2", Some(format!("bytes=10-{}", big.len() - 1)));
+        assert_eq!(r.body().len(), big.len() - 10, "явный запрос — целиком");
         let r = serve("a", "f1", Some("bytes=-16".into()));
         assert_eq!(r.body().as_slice(), &all[all.len() - 16..]);
         let r = serve("a", "f1", Some(format!("bytes={}-", all.len())));

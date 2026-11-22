@@ -10,6 +10,12 @@ use std::sync::atomic::{AtomicU16, Ordering};
 
 static PORT: AtomicU16 = AtomicU16::new(0);
 
+/// Сколько раз у тестового сервера просили каждый файл (для проверки кэша).
+pub fn hits() -> &'static std::sync::Mutex<std::collections::HashMap<String, usize>> {
+    static H: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, usize>>> = std::sync::OnceLock::new();
+    H.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
 /// Ссылка ведёт на наш тестовый сервер? (Только его порт, только 127.0.0.1, только http.)
 pub fn local_source(u: &str) -> bool {
     let p = PORT.load(Ordering::Relaxed);
@@ -25,13 +31,18 @@ fn handle(mut s: TcpStream, dir: PathBuf) -> std::io::Result<()> {
     let mut rd = BufReader::new(s.try_clone()?);
     let mut line = String::new();
     rd.read_line(&mut line)?;
-    let path = line.split_whitespace().nth(1).unwrap_or("/").trim_start_matches('/').to_string();
+    let mut path = line.split_whitespace().nth(1).unwrap_or("/").trim_start_matches('/').to_string();
+    // «slow/<файл>» — как настоящий сервер вдалеке: каждый ответ на 80 мс позже
+    let slow = path.starts_with("slow/");
+    if slow { path = path["slow/".len()..].to_string(); }
     let mut range = None;
     loop {
         let mut h = String::new();
         if rd.read_line(&mut h)? == 0 || h == "\r\n" || h == "\n" { break; }
         if let Some((k, v)) = h.split_once(':') { if k.trim().eq_ignore_ascii_case("range") { range = Some(v.trim().to_string()); } }
     }
+    if let Ok(mut h) = hits().lock() { *h.entry(path.clone()).or_insert(0) += 1; }
+    if slow { std::thread::sleep(std::time::Duration::from_millis(80)); }
     let fp = dir.join(&path);
     let f = if safe(&path) { std::fs::File::open(&fp).ok() } else { None };
     let Some(mut f) = f else {
@@ -84,11 +95,12 @@ pub const STREAMS: &[LabStream] = &[
     LabStream { id: "lab-aac", name: "Яндекс AAC 256 (без шифрования)", file: "aac-256.m4a", key: None, codec: "aac-mp4", plain: "aac-256.m4a", bad_first: false, chunk: 256 * 1024, diag: false },
     LabStream { id: "lab-mp3", name: "Яндекс MP3 320 (без шифрования)", file: "mp3-320.mp3", key: None, codec: "mp3", plain: "mp3-320.mp3", bad_first: false, chunk: 256 * 1024, diag: false },
     LabStream { id: "lab-retry", name: "Первая ссылка не работает → запасная", file: "ya-flac-mp4-16-44.enc", key: Some("00112233445566778899aabbccddeeff"), codec: "flac-mp4", plain: "flac-in-mp4.m4a", bad_first: true, chunk: 256 * 1024, diag: false },
-    // диагностика запуска (этап 3, отчёт 22.11): MP4 с описанием в конце и в начале, куски 256 КБ и 2 МБ (как с настоящим Яндексом)
-    LabStream { id: "diag-end-256", name: "24/96, описание в конце, куски 256 КБ", file: "ya-flac-mp4-24-96.enc", key: Some("0f1e2d3c4b5a69788796a5b4c3d2e1f00102030405060708090a0b0c0d0e0f10"), codec: "flac-mp4", plain: "ya-flac-mp4-24-96.plain.m4a", bad_first: false, chunk: 256 * 1024, diag: true },
-    LabStream { id: "diag-end-2m", name: "24/96, описание в конце, куски 2 МБ", file: "ya-flac-mp4-24-96.enc", key: Some("0f1e2d3c4b5a69788796a5b4c3d2e1f00102030405060708090a0b0c0d0e0f10"), codec: "flac-mp4", plain: "ya-flac-mp4-24-96.plain.m4a", bad_first: false, chunk: 2 * 1024 * 1024, diag: true },
-    LabStream { id: "diag-fast-256", name: "24/96, описание в начале, куски 256 КБ", file: "ya-flac-mp4-24-96-fast.enc", key: Some("0f1e2d3c4b5a69788796a5b4c3d2e1f00102030405060708090a0b0c0d0e0f10"), codec: "flac-mp4", plain: "ya-flac-mp4-24-96-fast.plain.m4a", bad_first: false, chunk: 256 * 1024, diag: true },
-    LabStream { id: "diag-fast-2m", name: "24/96, описание в начале, куски 2 МБ", file: "ya-flac-mp4-24-96-fast.enc", key: Some("0f1e2d3c4b5a69788796a5b4c3d2e1f00102030405060708090a0b0c0d0e0f10"), codec: "flac-mp4", plain: "ya-flac-mp4-24-96-fast.plain.m4a", bad_first: false, chunk: 2 * 1024 * 1024, diag: true },
+    // диагностика запуска (22.11): прежняя ошибка — урезанный ответ на явный запрос (куски 256 КБ); и как будет с
+    // настоящим Яндексом — каждый ответ сервера на 80 мс позже («slow/»)
+    LabStream { id: "diag-end-256", name: "24/96, описание в конце, куски 256 КБ (было: не играл)", file: "ya-flac-mp4-24-96.enc", key: Some("0f1e2d3c4b5a69788796a5b4c3d2e1f00102030405060708090a0b0c0d0e0f10"), codec: "flac-mp4", plain: "ya-flac-mp4-24-96.plain.m4a", bad_first: false, chunk: 256 * 1024, diag: true },
+    LabStream { id: "diag-fast-256", name: "24/96, описание в начале, куски 256 КБ (было: не играл)", file: "ya-flac-mp4-24-96-fast.enc", key: Some("0f1e2d3c4b5a69788796a5b4c3d2e1f00102030405060708090a0b0c0d0e0f10"), codec: "flac-mp4", plain: "ya-flac-mp4-24-96-fast.plain.m4a", bad_first: false, chunk: 256 * 1024, diag: true },
+    LabStream { id: "diag-end-slow", name: "24/96, описание в конце, сеть +80 мс на запрос", file: "slow/ya-flac-mp4-24-96.enc", key: Some("0f1e2d3c4b5a69788796a5b4c3d2e1f00102030405060708090a0b0c0d0e0f10"), codec: "flac-mp4", plain: "ya-flac-mp4-24-96.plain.m4a", bad_first: false, chunk: 2 * 1024 * 1024, diag: true },
+    LabStream { id: "diag-fast-slow", name: "24/96, описание в начале, сеть +80 мс на запрос", file: "slow/ya-flac-mp4-24-96-fast.enc", key: Some("0f1e2d3c4b5a69788796a5b4c3d2e1f00102030405060708090a0b0c0d0e0f10"), codec: "flac-mp4", plain: "ya-flac-mp4-24-96-fast.plain.m4a", bad_first: false, chunk: 2 * 1024 * 1024, diag: true },
 ];
 
 /// При запуске: сервер + регистрация тестовых потоков и своих файлов (постоянные адреса — их знает демо-интерфейс).

@@ -3,9 +3,9 @@
 //   здесь он расшифровывается на лету, кусками, по мере того как плеер просит данные. На диск ничего не пишется.
 // • Обычные ссылки тоже идут через эту схему: окно всегда может подключить к звуку эквалайзер (Web Audio).
 // • Перемотка: плеер просит кусок с любого места, счётчик AES-CTR сдвигается на нужный блок.
-// Отличие от Electron: ответ своей схемы в Tauri отдаётся целиком, поэтому большой запрос («bytes=0-») режем на
-// куски по 2 МБ — плеер сам попросит следующий. Это заменяет прежнее «не быстрее 3 МБ/с»: звук подгружается
-// по мере надобности, а не весь трек за пару секунд.
+// Отличие от Electron: ответ своей схемы в Tauri отдаётся целиком, поэтому открытый запрос («bytes=0-») режем на
+// куски по 2 МБ — плеер сам попросит следующий. Это заменяет прежнее «не быстрее 3 МБ/с». Явный запрос («bytes=a-b»)
+// отдаётся полностью. У сервера звук берётся блоками по 256 КБ через кэш (см. ниже).
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -226,6 +226,117 @@ pub async fn serve(id: &str, range: Option<String>) -> Response<Vec<u8>> {
     r
 }
 
+// ——— кэш расшифрованного звука блоками по 256 КБ ———
+// Плеер WebKit (AVFoundation) сначала разбирает MP4 десятками крошечных запросов по 4–8 байт (заголовки, описание
+// звука в начале или в конце файла), а потом просит звук кусками по ~400 КБ с явными границами. Каждый крошечный
+// запрос напрямую к Яндексу — это лишняя поездка по сети (у Яндекса 50–150 мс), старт трека растянулся бы на секунды.
+// Поэтому у сервера берём сразу блок 256 КБ, расшифровываем и держим в памяти: мелкие запросы отдаются из него мгновенно.
+// Явно запрошенный кусок отдаётся целиком: AVFoundation недостающее не дозапрашивает (проверено на Mac 22.11 —
+// урезанный ответ останавливал звук).
+const BLOCK: u64 = 256 * 1024;
+const BLOCKS_PER_TRACK: usize = 96; // до 24 МБ на трек
+const TRACKS_CACHED: usize = 4; // играющий, затухающий при кроссфейде, следующий, запас
+const EXPLICIT_MAX: u64 = 64 * 1024 * 1024;
+
+type Blk = std::sync::Arc<Vec<u8>>;
+struct Cache { total: Option<u64>, blocks: HashMap<u64, Blk>, order: std::collections::VecDeque<u64>, used: Instant }
+fn caches() -> &'static Mutex<HashMap<String, Cache>> {
+    static C: OnceLock<Mutex<HashMap<String, Cache>>> = OnceLock::new();
+    C.get_or_init(|| Mutex::new(HashMap::new()))
+}
+fn cache_total(id: &str) -> Option<u64> { caches().lock().ok()?.get(id)?.total }
+fn cache_take(id: &str, idx: u64) -> Option<Blk> {
+    let mut m = caches().lock().ok()?;
+    let c = m.get_mut(id)?;
+    let b = c.blocks.get(&idx)?.clone();
+    c.used = Instant::now();
+    if let Some(p) = c.order.iter().position(|x| *x == idx) { c.order.remove(p); }
+    c.order.push_back(idx);
+    Some(b)
+}
+fn cache_put(id: &str, total: u64, idx: u64, b: Blk) {
+    let Ok(mut m) = caches().lock() else { return };
+    if !m.contains_key(id) {
+        while m.len() >= TRACKS_CACHED {
+            let Some(old) = m.iter().min_by_key(|(_, c)| c.used).map(|(k, _)| k.clone()) else { break };
+            m.remove(&old);
+        }
+        m.insert(id.to_string(), Cache { total: None, blocks: HashMap::new(), order: Default::default(), used: Instant::now() });
+    }
+    let c = m.get_mut(id).unwrap();
+    c.total = Some(total);
+    c.used = Instant::now();
+    if c.blocks.insert(idx, b).is_none() { c.order.push_back(idx); }
+    while c.order.len() > BLOCKS_PER_TRACK { if let Some(x) = c.order.pop_front() { c.blocks.remove(&x); } }
+}
+
+enum FetchErr { NotSatisfiable(String), Other(String) }
+
+/// Байты [a, b] файла от сервера (по запасным ссылкам), расшифрованные. → (длина файла, данные с позиции a)
+async fn fetch_run(urls: &[String], key: &Option<Vec<u8>>, a: u64, b: u64) -> Result<(u64, Vec<u8>), FetchErr> {
+    let mut last = String::new();
+    for src in urls {
+        let r = client().get(src).header(header::RANGE, format!("bytes={a}-{b}")).send().await;
+        let up = match r { Ok(x) => x, Err(e) => { last = e.to_string(); continue; } };
+        let st = up.status();
+        if st == reqwest::StatusCode::RANGE_NOT_SATISFIABLE {
+            let total = up.headers().get(header::CONTENT_RANGE).and_then(|v| v.to_str().ok()).and_then(|v| v.rsplit('/').next()).unwrap_or("*").to_string();
+            return Err(FetchErr::NotSatisfiable(total));
+        }
+        if !st.is_success() { last = format!("HTTP {}", st.as_u16()); continue; }
+        let partial = st == reqwest::StatusCode::PARTIAL_CONTENT;
+        let cr = up.headers().get(header::CONTENT_RANGE).and_then(|v| v.to_str().ok()).and_then(content_range);
+        let body = match up.bytes().await { Ok(x) => x.to_vec(), Err(e) => { last = e.to_string(); continue; } };
+        let (total, mut data) = if partial {
+            let Some((s0, t)) = cr else { last = "нет Content-Range".into(); continue };
+            let Ok(t) = t.parse::<u64>() else { last = "неизвестна длина файла".into(); continue };
+            if s0 != a { last = format!("сервер прислал кусок с {s0} вместо {a}"); continue; }
+            (t, body)
+        } else {
+            // сервер не умеет куски и прислал файл целиком — вырезаем сами
+            let len = body.len() as u64;
+            if a >= len { return Err(FetchErr::NotSatisfiable(len.to_string())); }
+            (len, body[a as usize..=(b.min(len - 1)) as usize].to_vec())
+        };
+        if let Some(k) = key { decrypt_at(k, a, &mut data).map_err(FetchErr::Other)?; }
+        return Ok((total, data));
+    }
+    Err(FetchErr::Other(last))
+}
+
+/// Блоки i0..=i1 (из кэша или от сервера). → (длина файла, блоки)
+async fn blocks(id: &str, urls: &[String], key: &Option<Vec<u8>>, i0: u64, i1: u64) -> Result<(u64, HashMap<u64, Blk>), FetchErr> {
+    let mut have = HashMap::new();
+    let mut missing = Vec::new();
+    for i in i0..=i1 { match cache_take(id, i) { Some(b) => { have.insert(i, b); } None => missing.push(i) } }
+    let mut total = cache_total(id);
+    // подряд идущие недостающие блоки — одним запросом
+    let mut k = 0;
+    while k < missing.len() {
+        let r0 = missing[k];
+        let mut r1 = r0;
+        while k + 1 < missing.len() && missing[k + 1] == r1 + 1 { k += 1; r1 += 1; }
+        k += 1;
+        let mut b = r1 * BLOCK + BLOCK - 1;
+        if let Some(t) = total { if r0 * BLOCK >= t { return Err(FetchErr::NotSatisfiable(t.to_string())); } b = b.min(t - 1); }
+        let (t, data) = fetch_run(urls, key, r0 * BLOCK, b).await?;
+        total = Some(t);
+        // формат звука: по первому блоку, а если описание лежит дальше (MP4 без faststart) — по любому
+        if let Ok(mut f) = fmts().lock() {
+            if !f.contains_key(id) {
+                let x = if r0 == 0 { sniff(&data[..data.len().min(BLOCK as usize)]) } else { sniff_box(&data) };
+                if let Some(x) = x { if f.len() > MAX { f.clear(); } f.insert(id.to_string(), x); }
+            }
+        }
+        for (j, part) in data.chunks(BLOCK as usize).enumerate() {
+            let blk: Blk = std::sync::Arc::new(part.to_vec());
+            cache_put(id, t, r0 + j as u64, blk.clone());
+            have.insert(r0 + j as u64, blk);
+        }
+    }
+    Ok((total.unwrap_or(0), have))
+}
+
 async fn serve_inner(id: &str, range: Option<String>) -> Response<Vec<u8>> {
     let (urls, key, mime, chunk) = {
         let Ok(r) = reg().lock() else { return resp::plain(StatusCode::INTERNAL_SERVER_ERROR, "реестр") };
@@ -234,57 +345,40 @@ async fn serve_inner(id: &str, range: Option<String>) -> Response<Vec<u8>> {
             None => return resp::plain(StatusCode::NOT_FOUND, "нет такого звука"),
         }
     };
-    let asked = range.as_deref().and_then(resp::parse_want);
-    // что просим у сервера: не больше куска за раз
-    let up_range = match asked {
-        None => format!("bytes=0-{}", chunk - 1),
-        Some(Want::From(s, e)) => format!("bytes={}-{}", s, e.unwrap_or(u64::MAX).min(s + chunk - 1)),
-        Some(Want::Suffix(n)) => format!("bytes=-{}", n.min(chunk)),
+    let fail = |e: FetchErr| match e {
+        FetchErr::NotSatisfiable(t) => resp::not_satisfiable(&t),
+        FetchErr::Other(m) => { eprintln!("[pulseya] {m}"); resp::plain(StatusCode::BAD_GATEWAY, &format!("звук не загрузился: {m}")) }
     };
-    let mut last = String::new();
-    for src in &urls {
-        let r = client().get(src).header(header::RANGE, &up_range).send().await;
-        let up = match r { Ok(x) => x, Err(e) => { last = e.to_string(); continue; } };
-        let st = up.status();
-        if st == reqwest::StatusCode::RANGE_NOT_SATISFIABLE {
-            let total = up.headers().get(header::CONTENT_RANGE).and_then(|v| v.to_str().ok()).and_then(|v| v.rsplit('/').next()).unwrap_or("*").to_string();
-            return resp::not_satisfiable(&total);
+    let asked = range.as_deref().and_then(resp::parse_want);
+    // длина файла ещё неизвестна — узнаём, загрузив первый нужный блок
+    let total = match cache_total(id) {
+        Some(t) => t,
+        None => {
+            let first = match asked { Some(Want::From(s, _)) => s / BLOCK, _ => 0 };
+            match blocks(id, &urls, &key, first, first).await { Ok((t, _)) => t, Err(e) => return fail(e) }
         }
-        if !(st.is_success()) { last = format!("HTTP {}", st.as_u16()); continue; }
-        let partial = st == reqwest::StatusCode::PARTIAL_CONTENT;
-        let cr = up.headers().get(header::CONTENT_RANGE).and_then(|v| v.to_str().ok()).and_then(content_range);
-        let body = match up.bytes().await { Ok(b) => b.to_vec(), Err(e) => { last = e.to_string(); continue; } };
-        // сервер мог прислать файл целиком (200) — тогда вырезаем запрошенное сами
-        let (start, total, mut buf) = if partial {
-            let Some((a, total)) = cr else { last = "нет Content-Range".into(); continue };
-            (a, total, body)
-        } else {
-            let len = body.len() as u64;
-            let want = asked.unwrap_or(Want::From(0, None));
-            let Some((s, e)) = resp::resolve(want, len) else { return resp::not_satisfiable(&len.to_string()) };
-            let e = e.min(s + chunk - 1);
-            (s, len.to_string(), body[s as usize..=e as usize].to_vec())
-        };
-        if let Some(k) = &key {
-            if let Err(e) = decrypt_at(k, start, &mut buf) { return resp::plain(StatusCode::INTERNAL_SERVER_ERROR, &e); }
-        }
-        {
-            if let Ok(mut f) = fmts().lock() {
-                if !f.contains_key(id) {
-                    let x = if start == 0 { sniff(&buf[..buf.len().min(256 * 1024)]) } else { sniff_box(&buf) };
-                    if let Some(x) = x {
-                        if f.len() > MAX { f.clear(); }
-                        f.insert(id.to_string(), x);
-                    }
-                }
-            }
-        }
-        // целиком файл отдаём как 200 только если плеер не просил кусок
-        let whole = asked.is_none() && start == 0 && total == buf.len().to_string();
-        return resp::media(mime, buf, if whole { None } else { Some((start, total)) }, "no-store");
+    };
+    if total == 0 { return resp::not_satisfiable("0"); }
+    // что отдаём: «bytes=a-» — до 2 МБ (плеер попросит дальше сам); «bytes=a-b» — ровно столько, сколько просили
+    let (a, b, whole) = match asked {
+        None => if total <= chunk { (0, total - 1, true) } else { (0, chunk - 1, false) },
+        Some(Want::From(s, _)) if s >= total => return resp::not_satisfiable(&total.to_string()),
+        Some(Want::From(s, None)) => (s, (s + chunk - 1).min(total - 1), false),
+        Some(Want::From(s, Some(e))) => (s, e.min(total - 1).min(s + EXPLICIT_MAX - 1), false),
+        Some(Want::Suffix(n)) => (total - n.min(total).min(EXPLICIT_MAX), total - 1, false),
+    };
+    let (i0, i1) = (a / BLOCK, b / BLOCK);
+    let have = match blocks(id, &urls, &key, i0, i1).await { Ok((_, h)) => h, Err(e) => return fail(e) };
+    let mut out = Vec::with_capacity((b - a + 1) as usize);
+    for i in i0..=i1 {
+        let Some(blk) = have.get(&i) else { return resp::plain(StatusCode::BAD_GATEWAY, "звук не загрузился: блок потерян") };
+        let bs = i * BLOCK;
+        let from = a.max(bs) - bs;
+        let to = (b.min(bs + BLOCK - 1) - bs + 1).min(blk.len() as u64);
+        if from >= to { return resp::plain(StatusCode::BAD_GATEWAY, "звук не загрузился: короткий блок"); }
+        out.extend_from_slice(&blk[from as usize..to as usize]);
     }
-    eprintln!("[pulseya] {last}");
-    resp::plain(StatusCode::BAD_GATEWAY, &format!("звук не загрузился: {last}"))
+    resp::media(mime, out, if whole { None } else { Some((a, total.to_string())) }, "no-store")
 }
 
 #[cfg(test)]
@@ -383,7 +477,33 @@ mod tests {
             // за пределами файла
             let r = serve("t-24", Some(format!("bytes={}-", plain.len() + 5))).await;
             assert_eq!(r.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+            // явный запрос больше куска — отдаётся ЦЕЛИКОМ (ошибка tauri-test-3: урезанный ответ останавливал звук)
+            let r = serve("t-24", Some("bytes=44-428452".into())).await;
+            assert_eq!(r.body().len(), 428_409);
+            assert_eq!(r.body().as_slice(), &plain[44..=428_452]);
         });
         assert_eq!(fmt_of(&url), Some(Fmt { codec: "FLAC", sr: 96000, bits: 24 }));
+    }
+
+    // как разбирает MP4 плеер WebKit: десятки крошечных запросов → к серверу уходят единицы (кэш блоков)
+    #[test]
+    fn tiny_requests_use_cache() {
+        let port = crate::lab::start_server_at(format!("{}/../lab-media", env!("CARGO_MANIFEST_DIR")).into());
+        let plain = lab("ya-flac-mp4-24-96-fast.plain.m4a");
+        let n = plain.len() as u64;
+        add_as("t-hits".into(), vec![format!("http://127.0.0.1:{port}/ya-flac-mp4-24-96-fast.enc")],
+            Some("0f1e2d3c4b5a69788796a5b4c3d2e1f00102030405060708090a0b0c0d0e0f10".into()), Some("flac-mp4".into()), CHUNK).unwrap();
+        let before = crate::lab::hits().lock().unwrap().get("ya-flac-mp4-24-96-fast.enc").copied().unwrap_or(0);
+        tauri::async_runtime::block_on(async {
+            let mut asks: Vec<(u64, u64)> = vec![(0, 1), (0, 7), (28, 35), (36, 43), (144, 151), (1143, 1150), (8, 27)];
+            for k in 0..60u64 { asks.push((44 + k * 13, 44 + k * 13 + 7)); }
+            asks.push((n - 90, n - 1));
+            for (a, b) in asks {
+                let r = serve("t-hits", Some(format!("bytes={a}-{b}"))).await;
+                assert_eq!(r.body().as_slice(), &plain[a as usize..=b as usize], "кусок {a}-{b}");
+            }
+        });
+        let after = crate::lab::hits().lock().unwrap().get("ya-flac-mp4-24-96-fast.enc").copied().unwrap_or(0);
+        assert!(after - before <= 2, "к серверу ушло {} запросов вместо 1–2", after - before);
     }
 }

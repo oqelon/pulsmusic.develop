@@ -48,7 +48,7 @@ fn serve_test(app: &tauri::AppHandle, path: &str, range: Option<String>) -> Resp
     let ext = fp.extension().map(|e| e.to_string_lossy().to_string()).unwrap_or_default();
     let ct = match ext.as_str() { "opus" => "audio/ogg; codecs=opus", "wv" => "audio/x-wavpack", "enc" => "application/octet-stream", e => localfile::mime_of_ext(e) };
     let (start, end, partial) = match range.as_deref().and_then(resp::parse_want) {
-        Some(w) => match resp::resolve(w, len) { Some((a, b)) => (a, b.min(a + CHUNK - 1), true), None => return resp::not_satisfiable(&len.to_string()) },
+        Some(w) => match resp::resolve(w, len) { Some((a, b)) => (a, resp::cap_end(w, a, b, CHUNK), true), None => return resp::not_satisfiable(&len.to_string()) },
         None => (0, len.saturating_sub(1), false),
     };
     let n = if len == 0 { 0 } else { end - start + 1 };
