@@ -20,6 +20,7 @@ use crate::resp::{self, Want};
 
 const LIFE: Duration = Duration::from_secs(6 * 3600);
 const MAX: usize = 300;
+#[allow(dead_code)] // понадобится на этапе 4 (ya_add)
 pub const CHUNK: u64 = 2 * 1024 * 1024;
 
 struct Entry {
@@ -85,6 +86,7 @@ fn parse_key(k: Option<&str>) -> Option<Vec<u8>> {
     (0..k.len()).step_by(2).map(|i| u8::from_str_radix(&k[i..i + 2], 16).ok()).collect()
 }
 
+#[allow(dead_code)]
 fn new_id() -> String {
     let mut b = [0u8; 12];
     if getrandom::getrandom(&mut b).is_err() {
@@ -95,6 +97,7 @@ fn new_id() -> String {
 }
 
 /// Ссылки (и ключ, если звук зашифрован) → адрес для плеера.
+#[allow(dead_code)] // этап 4: вызывается из кода Яндекса (ya_add)
 pub fn add(urls: Vec<String>, key: Option<String>, codec: Option<String>) -> Result<String, String> {
     add_as(new_id(), urls, key, codec, CHUNK)
 }
@@ -127,24 +130,41 @@ pub fn fmt_of(url: &str) -> Option<Fmt> {
 
 // формат звука по первым байтам: частота и разрядность (FLAC — из STREAMINFO, AAC — из описания в MP4,
 // MP3 — из заголовка кадра). Яндекс сам их не сообщает, а показать «24 бит · 48 кГц» хочется честно
-fn find(b: &[u8], tag: &[u8]) -> Option<usize> { b.windows(tag.len()).position(|w| w == tag) }
 pub fn sniff(b: &[u8]) -> Option<Fmt> {
-    let mut i = find(b, b"fLaC").map(|x| x + 4);
-    if let Some(d) = find(b, b"dfLa") { i = Some(d + 8); } // FLAC в MP4: после «dfLa» — версия (4 байта), дальше как в FLAC
-    if let Some(i) = i {
-        if b.len() >= i + 4 + 18 {
-            let o = i + 4 + 10;
-            let sr = ((b[o] as u32) << 12) | ((b[o + 1] as u32) << 4) | ((b[o + 2] as u32) >> 4);
-            let bits = ((((b[o + 2] & 1) as u32) << 4) | ((b[o + 3] as u32) >> 4)) + 1;
-            if sr > 0 { return Some(Fmt { codec: "FLAC", sr, bits }); }
-        }
-    }
-    if let Some(m) = find(b, b"mp4a") {
-        if b.len() >= m + 32 {
+    if let Some(f) = sniff_box(b) { return Some(f); }
+    // MP4, FLAC и OGG — не MP3, даже если в звуке случайно найдётся похожий заголовок кадра
+    let other = (b.len() >= 8 && &b[4..8] == b"ftyp") || b.starts_with(b"fLaC") || b.starts_with(b"OggS");
+    if other { None } else { sniff_mp3(b) }
+}
+
+/// FLAC и AAC — по описанию звука. Его можно искать в любом куске: в MP4 без «faststart» описание (moov) лежит
+/// в конце файла, и плеер первым делом просит именно этот кусок.
+pub fn sniff_box(b: &[u8]) -> Option<Fmt> {
+    // ищем все вхождения: случайные байты «fLaC»/«mp4a» внутри звука отсеиваются проверкой структуры
+    let all = |tag: &'static [u8]| b.windows(4).enumerate().filter(move |(_, w)| *w == tag).map(|(k, _)| k);
+    // i — заголовок блока STREAMINFO: тип 0, длина 34
+    let streaminfo = |i: usize| -> Option<Fmt> {
+        if b.len() < i + 4 + 18 || (b[i] & 0x7f) != 0 || b[i + 1] != 0 || b[i + 2] != 0 || b[i + 3] != 34 { return None; }
+        let o = i + 4 + 10;
+        let sr = ((b[o] as u32) << 12) | ((b[o + 1] as u32) << 4) | ((b[o + 2] as u32) >> 4);
+        let bits = ((((b[o + 2] & 1) as u32) << 4) | ((b[o + 3] as u32) >> 4)) + 1;
+        if (8000..=768_000).contains(&sr) && (4..=32).contains(&bits) { Some(Fmt { codec: "FLAC", sr, bits }) } else { None }
+    };
+    // FLAC в MP4: после «dfLa» — версия (4 байта), дальше как в FLAC
+    for d in all(b"dfLa") { if let Some(f) = streaminfo(d + 8) { return Some(f); } }
+    for k in all(b"fLaC") { if let Some(f) = streaminfo(k + 4) { return Some(f); } }
+    for m in all(b"mp4a") {
+        if b.len() >= m + 32 && m >= 4 {
+            let size = u32::from_be_bytes([b[m - 4], b[m - 3], b[m - 2], b[m - 1]]);
             let sr = u16::from_be_bytes([b[m + 28], b[m + 29]]) as u32;
-            if sr > 0 { return Some(Fmt { codec: "AAC", sr, bits: 0 }); }
+            if (36..1 << 20).contains(&size) && (8000..=96_000).contains(&sr) { return Some(Fmt { codec: "AAC", sr, bits: 0 }); }
         }
     }
+    None
+}
+
+/// MP3 — по заголовку кадра; только в начале файла (в середине такие байты встречаются случайно).
+pub fn sniff_mp3(b: &[u8]) -> Option<Fmt> {
     const MP3_SR: [u32; 3] = [44100, 48000, 32000];
     let lim = b.len().min(8192);
     let mut k = 0;
@@ -220,10 +240,11 @@ pub async fn serve(id: &str, range: Option<String>) -> Response<Vec<u8>> {
         if let Some(k) = &key {
             if let Err(e) = decrypt_at(k, start, &mut buf) { return resp::plain(StatusCode::INTERNAL_SERVER_ERROR, &e); }
         }
-        if start == 0 {
+        {
             if let Ok(mut f) = fmts().lock() {
                 if !f.contains_key(id) {
-                    if let Some(x) = sniff(&buf[..buf.len().min(256 * 1024)]) {
+                    let x = if start == 0 { sniff(&buf[..buf.len().min(256 * 1024)]) } else { sniff_box(&buf) };
+                    if let Some(x) = x {
                         if f.len() > MAX { f.clear(); }
                         f.insert(id.to_string(), x);
                     }
@@ -286,6 +307,14 @@ mod tests {
         assert_eq!(sniff(&lab("flac-24-192.flac")), Some(Fmt { codec: "FLAC", sr: 192000, bits: 24 }));
         assert_eq!(sniff(&lab("aac-256.m4a")).map(|f| (f.codec, f.sr)), Some(("AAC", 44100)));
         assert_eq!(sniff(&lab("mp3-320.mp3")).map(|f| (f.codec, f.sr)), Some(("MP3", 44100)));
+        // описание в конце файла (MP4 без faststart): находится в последнем куске, а в куске из середины звука — нет
+        let p = lab("ya-flac-mp4-24-96.plain.m4a");
+        assert_eq!(sniff_box(&p[p.len() - 4000..]), Some(Fmt { codec: "FLAC", sr: 96000, bits: 24 }));
+        assert_eq!(sniff_box(&p[100_000..900_000]), None);
+        let f = lab("flac-24-192.flac");
+        assert_eq!(sniff_box(&f[200_000..]), None);
+        // начало MP4 без описания — не принимаем случайные байты звука за MP3
+        assert_eq!(sniff(&p[..200_000]), None);
     }
 
     // весь путь: локальный «сервер Яндекса» с Range → кусками, с разных мест → расшифровка → совпадает с исходником
