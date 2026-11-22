@@ -6,7 +6,7 @@
 //
 // Устройство:
 //  • голос (Voice) — один «плеер»: свой поток декодирования (Symphonia), пересчёт частоты под устройство (Rubato),
-//    небольшой буфер готового звука (~0,35 с). Голосов несколько — так работает плавный переход между треками;
+//    буфер готового звука (~0,75 с, кольцо без блокировок: вывод никогда не ждёт декодер). Голосов несколько — так работает плавный переход между треками;
 //  • вывод (CPAL) — один поток на устройство; в нём голоса смешиваются, затем общая обработка: предусиление,
 //    10-полосный эквалайзер, лимитер — как была цепочка Web Audio в «Пульсе»;
 //  • источники — те же, что у <audio>: pulseya:// (Яндекс: кэш, прогрев, расшифровка — yastream.rs) и pulsefile://
@@ -15,6 +15,7 @@
 //    закончился, ошибка, позиция).
 
 use std::collections::VecDeque;
+use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
 use std::io::{Read, Seek, SeekFrom};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
@@ -34,8 +35,11 @@ use symphonia::core::probe::Hint;
 use symphonia::core::units::{Time, TimeBase};
 use tauri::Emitter;
 
-/// Сколько готового звука держит голос (секунд). Меньше — быстрее реакция, больше — запас при нагрузке.
-const AHEAD: f64 = 0.35;
+/// Сколько готового звука держит голос (секунд). Перемотка и смена трека выбрасывают его сразу, поэтому запас
+/// не замедляет реакцию — он лишь спасает от пауз, когда система занята (живой фон, сеть, другие программы).
+const AHEAD: f64 = 0.75;
+/// Ёмкость кольца голоса (секунд при частоте устройства) — с запасом над AHEAD.
+const RING_SEC: usize = 3;
 /// Плавность громкости: смена громкости, пауза, старт и перемотка — без щелчков (секунд).
 const RAMP: f32 = 0.006;
 const TAP: usize = 4096;
@@ -47,10 +51,57 @@ fn f64_set(a: &AtomicU64, v: f64) { a.store(v.to_bits(), Ordering::Relaxed) }
 
 enum Cmd { Open(String, f64), Seek(f64), Stop }
 
+/// Готовый звук голоса: кольцо «пишет декодер — читает вывод» без блокировок, поэтому поток вывода никогда не
+/// ждёт и не пропускает звук из-за того, что декодер в этот момент дописывает буфер (так было с Mutex: вывод
+/// получал отказ и выдавал тишину — короткий треск). Индексы — счётчики сэмплов с начала, «есть» = w − r.
+/// Перемотка: `cut` = всё, что записано до него, выбрасывается (вывод перескакивает на cut).
+struct Ring { d: Box<[AtomicU32]>, mask: u64, w: AtomicU64, r: AtomicU64, cut: AtomicU64 }
+impl Ring {
+    fn new(samples: usize) -> Ring {
+        let cap = samples.max(4096).next_power_of_two();
+        Ring { d: (0..cap).map(|_| AtomicU32::new(0)).collect(), mask: cap as u64 - 1, w: AtomicU64::new(0), r: AtomicU64::new(0), cut: AtomicU64::new(0) }
+    }
+    fn cap(&self) -> usize { self.d.len() }
+    fn start(&self) -> u64 { self.r.load(Acquire).max(self.cut.load(Acquire)) }
+    /// сколько готовых сэмплов
+    fn len(&self) -> usize { self.w.load(Acquire).saturating_sub(self.start()) as usize }
+    /// декодер: дописать, сколько влезет (чётное число — стерео); вернуть, сколько записано
+    fn push(&self, s: &[f32]) -> usize {
+        let w = self.w.load(Relaxed);
+        let used = w.saturating_sub(self.start()) as usize;
+        let n = s.len().min(self.cap().saturating_sub(used)) & !1;
+        for (i, x) in s[..n].iter().enumerate() { self.d[((w + i as u64) & self.mask) as usize].store(x.to_bits(), Relaxed); }
+        self.w.store(w + n as u64, Release);
+        n
+    }
+    #[inline]
+    fn at(&self, i: u64) -> f32 { f32::from_bits(self.d[(i & self.mask) as usize].load(Relaxed)) }
+    /// выбросить всё записанное (перемотка, новый трек)
+    fn flush(&self) { let w = self.w.load(Acquire); self.cut.fetch_max(w, AcqRel); }
+    #[cfg(test)]
+    fn peek(&self, n: usize) -> Vec<f32> { let (s, w) = (self.start(), self.w.load(Acquire)); (s..w.min(s + n as u64)).map(|i| self.at(i)).collect() }
+}
+
+/// Счётчики сбоев звука — для отчёта «Лаборатории» (engine_stats). В потоке вывода только атомарные операции.
+pub struct Stats {
+    pub underruns: AtomicU64,     // вызовов вывода, когда играющему голосу не хватило звука
+    pub missing: AtomicU64,       // сколько кадров не хватило всего
+    pub late: AtomicU64,          // система вызвала вывод с опозданием (пропуск на уровне macOS/Windows)
+    pub cb_max_us: AtomicU64,     // самый долгий вызов вывода, мкс
+    pub cb_frames: AtomicU64,     // кадров в вызове (размер буфера устройства)
+    pub slow_reads: AtomicU64,    // чтений звука Яндекса дольше 150 мс (ждали сеть)
+    pub slow_read_max: AtomicU64, // самое долгое, мс
+    pub overflow: AtomicU64,      // не влезло в кольцо (не должно случаться)
+    pub stream_err: AtomicU64,    // ошибок потока вывода
+    pub rebuilds: AtomicU64,      // пересозданий вывода (смена устройства)
+}
+pub static ST: Stats = Stats { underruns: AtomicU64::new(0), missing: AtomicU64::new(0), late: AtomicU64::new(0), cb_max_us: AtomicU64::new(0), cb_frames: AtomicU64::new(0), slow_reads: AtomicU64::new(0), slow_read_max: AtomicU64::new(0), overflow: AtomicU64::new(0), stream_err: AtomicU64::new(0), rebuilds: AtomicU64::new(0) };
+fn since_start() -> u64 { static T: OnceLock<Instant> = OnceLock::new(); T.get_or_init(Instant::now).elapsed().as_millis() as u64 }
+
 pub struct Voice {
     pub id: u32,
     /// готовый звук: стерео, частота устройства, чередование L R L R
-    buf: Mutex<VecDeque<f32>>,
+    buf: Ring,
     playing: AtomicBool,
     /// идёт перемотка: вывод не берёт звук из буфера, пока декодер не встанет на новое место
     seeking: AtomicBool,
@@ -80,12 +131,39 @@ pub struct Voice {
 }
 
 impl Voice {
+    fn new(id: u32, tx: Sender<Cmd>, out_rate: u32) -> Voice {
+        Voice {
+            id,
+            buf: Ring::new(out_rate.max(44100) as usize * 2 * RING_SEC),
+            playing: AtomicBool::new(false),
+            seeking: AtomicBool::new(false),
+            vol: AtomicU32::new(1f32.to_bits()),
+            rate: AtomicU32::new(1f32.to_bits()),
+            base: AtomicU64::new(0f64.to_bits()),
+            consumed: AtomicU64::new(0),
+            dur: AtomicU64::new(f64::NAN.to_bits()),
+            gen: AtomicU64::new(0),
+            eof: AtomicBool::new(false),
+            ended: AtomicBool::new(false),
+            starved: AtomicBool::new(false),
+            loaded: AtomicBool::new(false),
+            cur_gain: AtomicU32::new(0f32.to_bits()),
+            cb_gen: AtomicU64::new(0),
+            error: Mutex::new(None),
+            tx: Mutex::new(tx),
+            ev_loaded: AtomicBool::new(false),
+            ev_ended: AtomicBool::new(false),
+            ev_starved: AtomicBool::new(false),
+            ev_err: AtomicBool::new(false),
+            ev_t: AtomicU64::new(0),
+        }
+    }
     pub fn position(&self, out_rate: u32) -> f64 {
         let r = f32_get(&self.rate).max(0.25) as f64;
         f64_get(&self.base) + self.consumed.load(Ordering::Relaxed) as f64 / out_rate.max(1) as f64 * r
     }
     fn flush(&self) {
-        if let Ok(mut b) = self.buf.lock() { b.clear(); }
+        self.buf.flush();
         self.consumed.store(0, Ordering::Relaxed);
         self.gen.fetch_add(1, Ordering::Relaxed);
         self.eof.store(false, Ordering::Relaxed);
@@ -108,6 +186,39 @@ pub struct Shared {
     device_now: Mutex<String>,
     next_id: AtomicU32,
     out_tx: Mutex<Option<Sender<String>>>,
+    /// убранные голоса держим ещё 2 с, чтобы память кольца освобождалась не в потоке вывода
+    grave: Mutex<Vec<(Instant, Arc<Voice>)>>,
+    /// журнал сбоев для отчёта
+    log: Mutex<VecDeque<String>>,
+}
+impl Shared {
+    fn new() -> Shared {
+        Shared {
+            voices: Mutex::new(Vec::new()),
+            voices_ver: AtomicU64::new(1),
+            out_rate: AtomicU32::new(48000),
+            eq: Mutex::new(EqParams { pre: 1.0, ver: 1, ..Default::default() }),
+            tap: Mutex::new((vec![0.0; TAP], 0)),
+            device: Mutex::new(String::new()),
+            device_now: Mutex::new(String::new()),
+            next_id: AtomicU32::new(1),
+            out_tx: Mutex::new(None),
+            grave: Mutex::new(Vec::new()),
+            log: Mutex::new(VecDeque::new()),
+        }
+    }
+    fn note(&self, m: String) {
+        eprintln!("[engine] {m}");
+        if let Ok(mut l) = self.log.lock() { l.push_back(format!("{:>8} мс  {m}", since_start())); while l.len() > 60 { l.pop_front(); } }
+    }
+}
+
+/// Перемотка голоса: старый звук больше не играет (вывод перескакивает через него), декодер встаёт на новое место.
+fn voice_seek(v: &Voice, t: f64) {
+    v.seeking.store(true, Relaxed);
+    f64_set(&v.base, t.max(0.0));
+    v.flush();
+    if let Ok(tx) = v.tx.lock() { let _ = tx.send(Cmd::Seek(t.max(0.0))); }
 }
 
 pub struct Engine { pub sh: Arc<Shared>, app: Option<tauri::AppHandle> }
@@ -119,17 +230,8 @@ pub fn get() -> Option<&'static Engine> { ENGINE.get() }
 /// Запустить движок (один раз): вывод на устройство и поток событий для окна.
 pub fn start(app: Option<tauri::AppHandle>) -> &'static Engine {
     ENGINE.get_or_init(|| {
-        let sh = Arc::new(Shared {
-            voices: Mutex::new(Vec::new()),
-            voices_ver: AtomicU64::new(1),
-            out_rate: AtomicU32::new(48000),
-            eq: Mutex::new(EqParams { pre: 1.0, ver: 1, ..Default::default() }),
-            tap: Mutex::new((vec![0.0; TAP], 0)),
-            device: Mutex::new(String::new()),
-            device_now: Mutex::new(String::new()),
-            next_id: AtomicU32::new(1),
-            out_tx: Mutex::new(None),
-        });
+        since_start();
+        let sh = Arc::new(Shared::new());
         let (tx, rx) = channel::<String>();
         if let Ok(mut t) = sh.out_tx.lock() { *t = Some(tx); }
         let s2 = sh.clone();
@@ -146,31 +248,7 @@ impl Engine {
     pub fn create(&self) -> u32 {
         let id = self.sh.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = channel::<Cmd>();
-        let v = Arc::new(Voice {
-            id,
-            buf: Mutex::new(VecDeque::new()),
-            playing: AtomicBool::new(false),
-            seeking: AtomicBool::new(false),
-            vol: AtomicU32::new(1f32.to_bits()),
-            rate: AtomicU32::new(1f32.to_bits()),
-            base: AtomicU64::new(0f64.to_bits()),
-            consumed: AtomicU64::new(0),
-            dur: AtomicU64::new(f64::NAN.to_bits()),
-            gen: AtomicU64::new(0),
-            eof: AtomicBool::new(false),
-            ended: AtomicBool::new(false),
-            starved: AtomicBool::new(false),
-            loaded: AtomicBool::new(false),
-            cur_gain: AtomicU32::new(0f32.to_bits()),
-            cb_gen: AtomicU64::new(0),
-            error: Mutex::new(None),
-            tx: Mutex::new(tx),
-            ev_loaded: AtomicBool::new(false),
-            ev_ended: AtomicBool::new(false),
-            ev_starved: AtomicBool::new(false),
-            ev_err: AtomicBool::new(false),
-            ev_t: AtomicU64::new(0),
-        });
+        let v = Arc::new(Voice::new(id, tx, self.sh.out_rate.load(Relaxed)));
         let (v2, sh2) = (v.clone(), self.sh.clone());
         std::thread::Builder::new().name(format!("pulse-dec-{id}")).spawn(move || decoder_thread(v2, sh2, rx)).ok();
         if let Ok(mut l) = self.sh.voices.lock() { l.push(v); }
@@ -182,7 +260,10 @@ impl Engine {
 
     pub fn drop_voice(&self, id: u32) {
         self.send(id, Cmd::Stop);
-        if let Ok(mut l) = self.sh.voices.lock() { l.retain(|v| v.id != id); }
+        if let Ok(mut l) = self.sh.voices.lock() {
+            if let Some(v) = l.iter().find(|v| v.id == id).cloned() { if let Ok(mut g) = self.sh.grave.lock() { g.push((Instant::now(), v)); } }
+            l.retain(|v| v.id != id);
+        }
         self.sh.voices_ver.fetch_add(1, Ordering::Relaxed);
     }
     pub fn open(&self, id: u32, url: String, start: f64) {
@@ -206,22 +287,18 @@ impl Engine {
     }
     pub fn pause(&self, id: u32) { if let Some(v) = self.voice(id) { v.playing.store(false, Ordering::Relaxed); } }
     /// Перемотка: старый звук выбрасывается сразу (вывод больше его не возьмёт), декодер встаёт на новое место.
-    pub fn seek(&self, id: u32, t: f64) {
-        if let Some(v) = self.voice(id) {
-            v.seeking.store(true, Ordering::Relaxed);
-            f64_set(&v.base, t.max(0.0));
-            v.flush();
-            if let Ok(tx) = v.tx.lock() { let _ = tx.send(Cmd::Seek(t.max(0.0))); }
-        }
-    }
+    pub fn seek(&self, id: u32, t: f64) { if let Some(v) = self.voice(id) { voice_seek(&v, t); } }
     pub fn volume(&self, id: u32, x: f32) { if let Some(v) = self.voice(id) { f32_set(&v.vol, x.clamp(0.0, 1.0)); } }
     pub fn rate(&self, id: u32, r: f32) {
         if let Some(v) = self.voice(id) {
             // позиция считается от base: фиксируем её на момент смены скорости
             let rate = self.sh.out_rate.load(Ordering::Relaxed);
             let pos = v.position(rate);
+            let (old, new) = (f32_get(&v.rate), r.clamp(0.5, 2.0));
             f64_set(&v.base, pos); v.consumed.store(0, Ordering::Relaxed);
-            f32_set(&v.rate, r.clamp(0.5, 2.0));
+            f32_set(&v.rate, new);
+            // заметная смена скорости — сразу (перемотка на то же место); мелкие подстройки «Искры» (до 3 %) — плавно
+            if (new - old).abs() > 0.05 && v.loaded.load(Relaxed) { voice_seek(&v, pos); }
         }
     }
     pub fn state(&self, id: u32) -> Option<VoiceState> {
@@ -257,6 +334,19 @@ impl Engine {
         if let Ok(t) = self.sh.out_tx.lock() { if let Some(t) = t.as_ref() { let _ = t.send(name); } }
     }
     pub fn device_now(&self) -> String { self.sh.device_now.lock().map(|d| d.clone()).unwrap_or_default() }
+    /// Сбои звука с запуска — для отчёта «Лаборатории».
+    pub fn stats(&self) -> serde_json::Value {
+        let g = |a: &AtomicU64| a.load(Relaxed);
+        let rate = self.out_rate().max(1) as u64;
+        serde_json::json!({
+            "rate": rate, "device": self.device_now(),
+            "underruns": g(&ST.underruns), "missing_ms": g(&ST.missing) * 1000 / rate, "late": g(&ST.late),
+            "cb_frames": g(&ST.cb_frames), "cb_max_ms": g(&ST.cb_max_us) as f64 / 1000.0,
+            "slow_reads": g(&ST.slow_reads), "slow_read_max_ms": g(&ST.slow_read_max), "overflow": g(&ST.overflow),
+            "stream_err": g(&ST.stream_err), "rebuilds": g(&ST.rebuilds), "ahead_s": AHEAD,
+            "log": self.sh.log.lock().map(|l| l.iter().cloned().collect::<Vec<_>>()).unwrap_or_default(),
+        })
+    }
     #[allow(dead_code)]
     pub fn has_app(&self) -> bool { self.app.is_some() }
 }
@@ -285,7 +375,11 @@ impl Read for YaSource {
         let n = (out.len() as u64).min(self.len - self.pos).min(256 * 1024);
         let mut last = String::new();
         for k in 0..4 {
-            match tauri::async_runtime::block_on(crate::yastream::read_range(&self.id, self.pos, self.pos + n - 1)) {
+            let t0 = Instant::now();
+            let got = tauri::async_runtime::block_on(crate::yastream::read_range(&self.id, self.pos, self.pos + n - 1));
+            let ms = t0.elapsed().as_millis() as u64;
+            if ms > 150 { ST.slow_reads.fetch_add(1, Relaxed); ST.slow_read_max.fetch_max(ms, Relaxed); }
+            match got {
                 Ok((_, d)) if !d.is_empty() => { let m = d.len().min(out.len()); out[..m].copy_from_slice(&d[..m]); self.pos += m as u64; return Ok(m); }
                 Ok(_) => return Ok(0),
                 Err(e) => { last = e; std::thread::sleep(Duration::from_millis(300 * (k + 1))); }
@@ -431,10 +525,13 @@ fn dbg(i: usize, n: u64) { DBG[i].fetch_add(n, Ordering::Relaxed); }
 
 fn push(v: &Voice, l: &[f32], r: &[f32]) {
     dbg(3, l.len() as u64);
-    if l.is_empty() { return; }
-    if let Ok(mut b) = v.buf.lock() {
-        b.reserve(l.len() * 2);
-        for i in 0..l.len() { b.push_back(l[i]); b.push_back(r[i]); }
+    let mut tmp = [0f32; 2048];
+    for (cl, cr) in l.chunks(1024).zip(r.chunks(1024)) {
+        for i in 0..cl.len() { tmp[i * 2] = cl[i]; tmp[i * 2 + 1] = cr[i]; }
+        let want = cl.len() * 2;
+        let put = v.buf.push(&tmp[..want]);
+        // декодер пишет, только пока в кольце меньше половины, так что сюда не попадаем; если всё же — считаем
+        if put < want { ST.overflow.fetch_add(((want - put) / 2) as u64, Relaxed); return; }
     }
 }
 
@@ -448,8 +545,8 @@ fn decoder_thread(v: Arc<Voice>, sh: Arc<Shared>, rx: Receiver<Cmd>) {
     let mut cur: Option<Track> = None;
     loop {
         let out_rate = sh.out_rate.load(Ordering::Relaxed);
-        let ahead = (out_rate as f64 * AHEAD) as usize * 2;
-        let buffered = v.buf.lock().map(|b| b.len()).unwrap_or(0);
+        let ahead = ((out_rate as f64 * AHEAD) as usize * 2).min(v.buf.cap() / 2);
+        let buffered = v.buf.len();
         let busy = cur.is_some() && !v.eof.load(Ordering::Relaxed) && buffered < ahead && !v.error.lock().map(|e| e.is_some()).unwrap_or(false);
         // команды: все, что накопились (несколько перемоток подряд — важна последняя)
         let first = if busy { rx.try_recv().map_err(|e| match e { std::sync::mpsc::TryRecvError::Empty => RecvTimeoutError::Timeout, _ => RecvTimeoutError::Disconnected }) } else { rx.recv_timeout(Duration::from_millis(15)) };
@@ -469,6 +566,9 @@ fn decoder_thread(v: Arc<Voice>, sh: Arc<Shared>, rx: Receiver<Cmd>) {
             cur = None;
             match open_track(&u) {
                 Ok((t, dur)) => {
+                    // пока открывали, мог успеть лечь кусок прежнего трека — выбрасываем
+                    v.buf.flush();
+                    v.eof.store(false, Relaxed); v.ended.store(false, Relaxed);
                     f64_set(&v.dur, dur);
                     cur = Some(t);
                     if start > 0.05 { seek = Some(start); } else { f64_set(&v.base, 0.0); }
@@ -488,7 +588,7 @@ fn decoder_thread(v: Arc<Voice>, sh: Arc<Shared>, rx: Receiver<Cmd>) {
                 }
             }
             // всё, что декодер успел положить до перемотки, — выбрасываем; вывод снова берёт звук с нового места
-            if let Ok(mut b) = v.buf.lock() { b.clear(); }
+            v.buf.flush();
             f64_set(&v.base, t.max(0.0));
             v.consumed.store(0, Ordering::Relaxed);
             v.gen.fetch_add(1, Ordering::Relaxed);
@@ -617,20 +717,39 @@ impl Master {
             let gen = v.gen.load(Ordering::Relaxed);
             if gen != v.cb_gen.load(Ordering::Relaxed) { v.cb_gen.store(gen, Ordering::Relaxed); g = 0.0; } // после перемотки — мягкое начало
             if !playing && g <= 0.0 { f32_set(&v.cur_gain, 0.0); continue; }
-            let Ok(mut b) = v.buf.try_lock() else { continue };
-            let avail = b.len() / 2;
+            // кольцо: читаем без блокировок, ничего не выделяя в памяти
+            let ring = &v.buf;
+            let mut rd = ring.start();
+            let w = ring.w.load(Acquire);
+            let avail = (w.saturating_sub(rd) / 2) as usize;
             let n = avail.min(frames);
-            for (i, (l, r)) in b.drain(..n * 2).collect::<Vec<f32>>().chunks_exact(2).map(|c| (c[0], c[1])).enumerate() {
+            let eof = v.eof.load(Relaxed);
+            let short = n < frames && playing && !eof;
+            // после нехватки звука — мягкое начало; перед нехваткой — мягкий спад (без щелчка)
+            if playing && n > 0 && v.starved.load(Relaxed) { g = 0.0; }
+            let k = ((RAMP * rate as f32) as usize).min(n).max(1);
+            let fade_from = if short { n.saturating_sub(k) } else { usize::MAX };
+            let mut used = n;
+            for i in 0..n {
                 if g < target { g = (g + step).min(target); } else if g > target { g = (g - step).max(target); }
-                self.mix[i * 2] += l * g; self.mix[i * 2 + 1] += r * g;
+                if !playing && g <= 0.0 { used = i; break; }
+                let f = if i >= fade_from { (n - i) as f32 / k as f32 } else { 1.0 };
+                let (l, r) = (ring.at(rd), ring.at(rd + 1));
+                rd += 2;
+                self.mix[i * 2] += l * g * f; self.mix[i * 2 + 1] += r * g * f;
             }
-            drop(b);
+            ring.r.store(rd, Release);
+            if short { g = 0.0; }
             f32_set(&v.cur_gain, g);
-            if playing || g > 0.0 { v.consumed.fetch_add(n as u64, Ordering::Relaxed); }
+            if playing || used > 0 { v.consumed.fetch_add(used as u64, Relaxed); }
             if n < frames && playing {
-                if v.eof.load(Ordering::Relaxed) { if avail == 0 || n == avail { v.ended.store(true, Ordering::Relaxed); v.playing.store(false, Ordering::Relaxed); } }
-                else if v.loaded.load(Ordering::Relaxed) { v.starved.store(true, Ordering::Relaxed); }
-            } else if n > 0 { v.starved.store(false, Ordering::Relaxed); }
+                if eof { if avail == 0 || n == avail { v.ended.store(true, Relaxed); v.playing.store(false, Relaxed); } }
+                else if v.loaded.load(Relaxed) {
+                    v.starved.store(true, Relaxed);
+                    // считаем только посреди звучания (не ожидание в начале трека или после перемотки)
+                    if v.consumed.load(Relaxed) > 0 { ST.underruns.fetch_add(1, Relaxed); ST.missing.fetch_add((frames - n) as u64, Relaxed); }
+                }
+            } else if n > 0 { v.starved.store(false, Relaxed); }
         }
         // общая шина: предусиление → эквалайзер → лимитер
         let eq = self.p.on && self.p.g.iter().any(|x| x.abs() > 0.01);
@@ -668,20 +787,34 @@ fn build_stream(sh: Arc<Shared>, name: &str) -> Result<(cpal::Stream, String), S
     let cfg = dev.default_output_config().map_err(|e| e.to_string())?;
     let rate = cfg.sample_rate().0;
     let ch = cfg.channels() as usize;
-    sh.out_rate.store(rate, Ordering::Relaxed);
+    let old = sh.out_rate.swap(rate, AcqRel);
+    if old != rate {
+        // у нового устройства другая частота: готовый звук посчитан под старую — пересчитываем с того же места
+        let list = sh.voices.lock().map(|l| l.clone()).unwrap_or_default();
+        for v in list { if v.loaded.load(Relaxed) { voice_seek(&v, v.position(old)); } }
+        sh.note(format!("частота вывода {old} → {rate} Гц, голоса пересчитаны"));
+    }
     let scfg: cpal::StreamConfig = cfg.clone().into();
-    let err = |e: cpal::StreamError| eprintln!("[engine] вывод: {e}");
+    let sh_err = sh.clone();
+    let err = move |e: cpal::StreamError| { ST.stream_err.fetch_add(1, Relaxed); sh_err.note(format!("ошибка вывода: {e}")); };
     macro_rules! mk {
         ($t:ty, $conv:expr) => {{
             let sh2 = sh.clone();
             let mut m = Master::new();
+            let mut last: Option<Instant> = None;
             dev.build_output_stream(&scfg, move |data: &mut [$t], _| {
+                let t0 = Instant::now();
                 let frames = data.len() / ch.max(1);
+                // система позвала вывод заметно позже, чем кончился прошлый кусок, — пропуск не по нашей вине
+                if let Some(p) = last { if t0.duration_since(p).as_secs_f64() > 2.5 * frames as f64 / rate as f64 + 0.004 { ST.late.fetch_add(1, Relaxed); } }
+                last = Some(t0);
+                ST.cb_frames.store(frames as u64, Relaxed);
                 m.render(&sh2, frames, rate);
                 for i in 0..frames {
                     let (l, r) = (m.mix[i * 2], m.mix[i * 2 + 1]);
                     for c in 0..ch { data[i * ch + c] = $conv(if ch == 1 { (l + r) * 0.5 } else if c == 0 { l } else if c == 1 { r } else { 0.0 }); }
                 }
+                ST.cb_max_us.fetch_max(t0.elapsed().as_micros() as u64, Relaxed);
             }, err, None)
         }};
     }
@@ -693,6 +826,8 @@ fn build_stream(sh: Arc<Shared>, name: &str) -> Result<(cpal::Stream, String), S
         f => return Err(format!("формат вывода {f:?} не поддержан")),
     }.map_err(|e| e.to_string())?;
     stream.play().map_err(|e| e.to_string())?;
+    ST.rebuilds.fetch_add(1, Relaxed);
+    sh.note(format!("вывод: «{dname}», {rate} Гц, {ch} кан., {:?}", cfg.sample_format()));
     Ok((stream, dname))
 }
 
@@ -704,7 +839,7 @@ fn output_thread(sh: Arc<Shared>, rx: Receiver<String>) {
         if stream.is_none() {
             match build_stream(sh.clone(), &want) {
                 Ok((s, n)) => { stream = Some(s); if let Ok(mut d) = sh.device_now.lock() { *d = n.clone(); } last_default = n; }
-                Err(e) => { eprintln!("[engine] устройство: {e}"); }
+                Err(e) => { sh.note(format!("устройство: {e}")); }
             }
         }
         match rx.recv_timeout(Duration::from_millis(1500)) {
@@ -729,10 +864,19 @@ struct Ev { v: u32, k: &'static str, t: f64, d: f64, e: Option<String> }
 
 fn event_thread(sh: Arc<Shared>, app: tauri::AppHandle) {
     let t0 = Instant::now();
+    let (mut seen_under, mut seen_late, mut seen_slow) = (0u64, 0u64, 0u64);
     loop {
         std::thread::sleep(Duration::from_millis(50));
         let rate = sh.out_rate.load(Ordering::Relaxed);
         let list = sh.voices.lock().map(|l| l.clone()).unwrap_or_default();
+        if let Ok(mut g) = sh.grave.lock() { g.retain(|(t, _)| t.elapsed() < Duration::from_secs(2)); }
+        // журнал сбоев: что было с голосами в момент нехватки звука
+        let (u, l, sr) = (ST.underruns.load(Relaxed), ST.late.load(Relaxed), ST.slow_reads.load(Relaxed));
+        if u != seen_under || l != seen_late || sr != seen_slow {
+            let vs: Vec<String> = list.iter().map(|v| format!("голос {}: {:.1} с, в запасе {} мс{}{}", v.id, v.position(rate), v.buf.len() as u64 * 500 / rate.max(1) as u64, if v.playing.load(Relaxed) { "" } else { ", пауза" }, if v.eof.load(Relaxed) { ", конец файла" } else { "" })).collect();
+            sh.note(format!("нехватка звука +{}, опоздания системы +{}, медленные чтения сети +{} (макс {} мс); {}", u - seen_under, l - seen_late, sr - seen_slow, ST.slow_read_max.load(Relaxed), vs.join("; ")));
+            seen_under = u; seen_late = l; seen_slow = sr;
+        }
         let now = t0.elapsed().as_millis() as u64;
         for v in list {
             let t = v.position(rate);
@@ -759,24 +903,23 @@ mod tests {
     fn seek_is_exact_and_flushes() {
         crate::localfile::register("eng-tone", crate::localfile::Src::File(lab("seek-tone.m4a")));
         let (tx, rx) = channel::<Cmd>();
-        let sh = Arc::new(Shared { voices: Mutex::new(vec![]), voices_ver: AtomicU64::new(1), out_rate: AtomicU32::new(48000), eq: Mutex::new(EqParams { pre: 1.0, ver: 1, ..Default::default() }), tap: Mutex::new((vec![0.0; TAP], 0)), device: Mutex::new(String::new()), device_now: Mutex::new(String::new()), next_id: AtomicU32::new(1), out_tx: Mutex::new(None) });
-        let v = Arc::new(Voice { id: 99, buf: Mutex::new(VecDeque::new()), playing: AtomicBool::new(false), seeking: AtomicBool::new(false), vol: AtomicU32::new(1f32.to_bits()), rate: AtomicU32::new(1f32.to_bits()), base: AtomicU64::new(0), consumed: AtomicU64::new(0), dur: AtomicU64::new(f64::NAN.to_bits()), gen: AtomicU64::new(0), eof: AtomicBool::new(false), ended: AtomicBool::new(false), starved: AtomicBool::new(false), loaded: AtomicBool::new(false), cur_gain: AtomicU32::new(0), cb_gen: AtomicU64::new(0), error: Mutex::new(None), tx: Mutex::new(tx.clone()), ev_loaded: AtomicBool::new(false), ev_ended: AtomicBool::new(false), ev_starved: AtomicBool::new(false), ev_err: AtomicBool::new(false), ev_t: AtomicU64::new(0) });
+        let sh = Arc::new(Shared::new());
+        let v = Arc::new(Voice::new(99, tx.clone(), 48000));
         let (v2, sh2) = (v.clone(), sh.clone());
         std::thread::spawn(move || decoder_thread(v2, sh2, rx));
         tx.send(Cmd::Open("pulsefile://a/eng-tone".into(), 0.0)).unwrap();
-        let wait_fill = |v: &Voice| { let t0 = Instant::now(); while v.buf.lock().unwrap().len() < 30000 && t0.elapsed() < Duration::from_secs(5) { std::thread::sleep(Duration::from_millis(5)); } };
+        let wait_fill = |v: &Voice| { let t0 = Instant::now(); while v.buf.len() < 30000 && t0.elapsed() < Duration::from_secs(5) { std::thread::sleep(Duration::from_millis(5)); } };
         wait_fill(&v);
         assert!(v.loaded.load(Ordering::Relaxed), "не открылся: {:?}", v.error.lock().unwrap());
         assert!((f64_get(&v.dur) - 30.0).abs() < 0.2, "длительность {}", f64_get(&v.dur));
         // частота тона в буфере → секунда трека (300 + 60·с Гц), по пересечениям нуля
         let sec_now = |v: &Voice| -> f64 {
-            let b = v.buf.lock().unwrap();
-            let l: Vec<f32> = b.iter().step_by(2).take(9600).cloned().collect();
+            let l: Vec<f32> = v.buf.peek(19200).into_iter().step_by(2).collect();
             let z = l.windows(2).filter(|w| w[0] <= 0.0 && w[1] > 0.0).count() as f64;
             let hz = z / (l.len() as f64 / 48000.0);
             (hz - 300.0) / 60.0
         };
-        let dbgs = || format!("пакеты {}, ошибки {}, чужие {}, кадры {}, eof {}, буфер {}, ошибка {:?}", DBG[0].load(Ordering::Relaxed), DBG[1].load(Ordering::Relaxed), DBG[2].load(Ordering::Relaxed), DBG[3].load(Ordering::Relaxed), v.eof.load(Ordering::Relaxed), v.buf.lock().unwrap().len(), v.error.lock().unwrap());
+        let dbgs = || format!("пакеты {}, ошибки {}, чужие {}, кадры {}, eof {}, буфер {}, ошибка {:?}", DBG[0].load(Ordering::Relaxed), DBG[1].load(Ordering::Relaxed), DBG[2].load(Ordering::Relaxed), DBG[3].load(Ordering::Relaxed), v.eof.load(Ordering::Relaxed), v.buf.len(), v.error.lock().unwrap());
         assert!(sec_now(&v).abs() < 0.6, "в начале звучит секунда {}; {}", sec_now(&v), dbgs());
         for target in [20.3, 5.3, 27.3, 12.3] {
             v.seeking.store(true, Ordering::Relaxed); v.flush();
@@ -811,6 +954,72 @@ mod tests {
             match r { Ok((fr, _, _)) if fr > 1000 => {}, Ok((fr, er, m)) => bad.push(format!("{f}: кадров {fr}, ошибок {er}, {m}")), Err(e) => bad.push(format!("{f}: {e}")) }
         }
         assert!(bad.is_empty(), "не декодируются: {bad:#?}");
+    }
+
+    // кольцо: один пишет, другой читает одновременно — ничего не теряется и не повторяется; сброс выбрасывает старое
+    #[test]
+    fn ring_spsc_no_loss() {
+        let ring = Arc::new(Ring::new(8192));
+        let total = 2_000_000u64;
+        let r2 = ring.clone();
+        let prod = std::thread::spawn(move || {
+            let mut x = 0u64; let mut sz = 2usize;
+            while x < total {
+                let chunk: Vec<f32> = (0..sz as u64).map(|i| ((x + i) % 1_000_000) as f32).collect();
+                let put = r2.push(&chunk) as u64; x += put;
+                if put == 0 { std::thread::yield_now(); }
+                sz = (if sz >= 3000 { 2 } else { sz * 3 + 2 }) & !1;
+            }
+        });
+        let mut want = 0u64;
+        let t0 = Instant::now();
+        while want < total && t0.elapsed() < Duration::from_secs(20) {
+            let mut rd = ring.start(); let w = ring.w.load(Acquire);
+            let n = (w - rd).min(1000);
+            for _ in 0..n { assert_eq!(ring.at(rd), (want % 1_000_000) as f32, "сэмпл {want}"); rd += 1; want += 1; }
+            ring.r.store(rd, Release);
+        }
+        prod.join().unwrap();
+        assert_eq!(want, total);
+        ring.push(&[1.0, 2.0, 3.0, 4.0]); ring.flush();
+        assert_eq!(ring.len(), 0, "после сброса старое не должно остаться");
+        ring.push(&[5.0, 6.0]);
+        assert_eq!(ring.peek(10), vec![5.0, 6.0]);
+    }
+
+    // вывод в реальном времени, пока декодер работает рядом: звук непрерывный, ни одной нехватки
+    #[test]
+    fn render_is_continuous_while_decoding() {
+        crate::localfile::register("eng-tone-r", crate::localfile::Src::File(lab("seek-tone.m4a")));
+        let (tx, rx) = channel::<Cmd>();
+        let sh = Arc::new(Shared::new());
+        let v = Arc::new(Voice::new(98, tx.clone(), 48000));
+        sh.voices.lock().unwrap().push(v.clone()); sh.voices_ver.fetch_add(1, Relaxed);
+        let (v2, sh2) = (v.clone(), sh.clone());
+        std::thread::spawn(move || decoder_thread(v2, sh2, rx));
+        tx.send(Cmd::Open("pulsefile://a/eng-tone-r".into(), 3.0)).unwrap();
+        let t0 = Instant::now();
+        while v.buf.len() < 48000 && t0.elapsed() < Duration::from_secs(5) { std::thread::sleep(Duration::from_millis(5)); }
+        v.playing.store(true, Relaxed);
+        let mut m = Master::new();
+        let (mut zero_run, mut worst, mut starts) = (0usize, 0usize, 0usize);
+        let under0 = ST.underruns.load(Relaxed);
+        let t0 = Instant::now();
+        for k in 0..280 { // ~3 с по 512 кадров, в темпе реального времени
+            m.render(&sh, 512, 48000);
+            for i in 0..512 {
+                let x = m.mix[i * 2];
+                if k == 0 && i < 400 { continue; } // мягкое начало
+                if x.abs() < 1e-3 { zero_run += 1; worst = worst.max(zero_run); } else { if zero_run > 0 { starts += 1; } zero_run = 0; }
+            }
+            let due = Duration::from_secs_f64((k + 1) as f64 * 512.0 / 48000.0);
+            if let Some(d) = due.checked_sub(t0.elapsed()) { std::thread::sleep(d); }
+        }
+        let _ = starts;
+        assert_eq!(ST.underruns.load(Relaxed) - under0, 0, "вывод недополучил звук");
+        assert!(worst < 8, "в звуке тишина {worst} сэмплов подряд");
+        assert!((v.position(48000) - 3.0 - 280.0 * 512.0 / 48000.0).abs() < 0.02, "позиция {}", v.position(48000));
+        tx.send(Cmd::Stop).unwrap();
     }
 
     #[test]
