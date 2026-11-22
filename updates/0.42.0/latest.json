@@ -1,0 +1,17 @@
+{
+  "version": "0.42.0",
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.42.0/pulse-app-0.42.0.zip",
+  "sha256": "e7493a565a97fb19ee0c1fdabd5e9779cfae7856158f078c2510a4c02421a12b",
+  "size": 1155194,
+  "minElectron": "33.2.1",
+  "date": "2026-11-23",
+  "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
+  "notes": [
+    "Mac больше не спрашивает пароль от связки ключей после каждого обновления: вход хранится в защищённом файле «Пульса» (после этого обновления спросит в последний раз)",
+    "Фото исполнителя видно целиком",
+    "С обычного «Пульса» — переход на новую версию: данные и вход переносятся сами"
+  ],
+  "engine": "tauri",
+  "online": "https://pulse-online.pulsmusic.workers.dev",
+  "sig": "Xgg3Olot3v7eBIU/2UiO+KKaM/u1EETdUTu5yMaKwFuh72htkghn3nExGt8oORSDu9iQk6USDgmBWrUU99xnDw=="
+}
