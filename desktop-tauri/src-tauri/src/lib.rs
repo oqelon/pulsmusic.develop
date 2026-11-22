@@ -13,7 +13,9 @@
 
 mod engine;
 mod lab;
+mod ldb;
 mod localfile;
+mod migrate;
 mod resp;
 mod yastream;
 
@@ -228,6 +230,9 @@ async fn open_ui(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(w) = app.get_webview_window("main") { let _ = w.show(); let _ = w.set_focus(); return Ok(()); }
     // токен — один раз в окно при открытии (как preload.js в Electron читал его из зашифрованного хранилища);
     // мост (pulse-bridge.js) забирает его и убирает из window
+    // перенос из Electron (если ещё не был) — до открытия окна: окно сразу получает перенесённые данные
+    { let a = app.clone(); let _ = tauri::async_runtime::spawn_blocking(move || migrate::auto(&a)).await; }
+    let mig = migrate::window_script(&app);
     let (t, info) = token_get(&app);
     let tok = serde_json::to_string(&t).unwrap_or_else(|_| "\"\"".into());
     let info = serde_json::to_string(&info).unwrap_or_else(|_| "\"\"".into());
@@ -235,7 +240,7 @@ async fn open_ui(app: tauri::AppHandle) -> Result<(), String> {
         .title("Пульс")
         .inner_size(1440.0, 900.0)
         .min_inner_size(1040.0, 680.0)
-        .initialization_script(format!("window.__PULSE_TOKEN__ = {tok}; window.__PULSE_TOKEN_INFO__ = {info};"))
+        .initialization_script(format!("window.__PULSE_TOKEN__ = {tok}; window.__PULSE_TOKEN_INFO__ = {info}; {mig}"))
         // как hardenWindow в Electron-версии (security.js): окно «Пульса» никуда не уходит со своей страницы —
         // случайный переход (перетащенная картинка, ссылка) перезагрузил бы интерфейс. Ссылки наружу — в браузер.
         .on_navigation({ let h = app.clone(); move |u| nav_guard(&h, u) });
@@ -266,6 +271,50 @@ fn chrono_now() -> String {
 }
 #[tauri::command] fn lab_nav_log() -> Vec<String> { NAV_LOG.lock().map(|l| l.clone()).unwrap_or_default() }
 
+// ——— этап 5: перенос данных из Electron (migrate.rs) ———
+async fn reopen_ui(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(m) = app.get_webview_window("main") { let _ = m.destroy(); }
+    let _ = tauri::async_runtime::spawn_blocking(|| std::thread::sleep(std::time::Duration::from_millis(300))).await;
+    open_ui(app).await
+}
+#[tauri::command] fn migrate_status(app: tauri::AppHandle) -> serde_json::Value { migrate::status(&app) }
+#[tauri::command] fn migrate_applied(app: tauri::AppHandle, stamp: String, before: String, n: u64, bad: Vec<String>) -> Result<(), String> { migrate::applied(&app, stamp, before, n, bad) }
+#[tauri::command] fn migrate_restored(app: tauri::AppHandle) -> Result<(), String> { migrate::restored(&app) }
+/// «Перенести заново»: новая копия и чтение Electron, окно «Пульса» открывается заново и получает данные
+#[tauri::command]
+async fn migrate_rerun(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    let a = app.clone();
+    let r = tauri::async_runtime::spawn_blocking(move || migrate::prepare(&a)).await.map_err(|e| e.to_string())??;
+    if app.get_webview_window("main").is_some() { reopen_ui(app).await?; }
+    Ok(r)
+}
+/// «Вернуть, как было до переноса»
+#[tauri::command]
+async fn migrate_restore(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    let a = app.clone();
+    let r = tauri::async_runtime::spawn_blocking(move || migrate::restore(&a)).await.map_err(|e| e.to_string())??;
+    reopen_ui(app).await?;
+    Ok(r)
+}
+// аккаунт «Пульса» (друзья, чаты, «Искра») — как social:get / social:set в Electron-версии (main.js)
+const SOCIAL_URL: &str = "https://pulse-online.pulsmusic.workers.dev";
+#[tauri::command]
+fn social_get(app: tauri::AppHandle) -> serde_json::Value {
+    let mut v = migrate::social_read(&app);
+    if !v.is_object() { v = serde_json::json!({}); }
+    v["url"] = serde_json::json!(SOCIAL_URL);
+    v
+}
+#[tauri::command]
+fn social_set(app: tauri::AppHandle, patch: serde_json::Value) -> Result<bool, String> {
+    let mut cur = migrate::social_read(&app);
+    if !cur.is_object() { cur = serde_json::json!({}); }
+    for k in ["session", "key", "devId", "me"] {
+        if let Some(s) = patch.get(k).and_then(|x| x.as_str()) { if s.len() < 200_000 { cur[k] = serde_json::json!(s); } }
+    }
+    migrate::social_write(&app, &cur).map(|_| true)
+}
+
 // ——— PULSE Audio Engine: команды окна (см. engine.rs) ———
 fn eng() -> Result<&'static engine::Engine, String> { engine::get().ok_or_else(|| "движок не запущен".to_string()) }
 #[tauri::command] fn engine_create() -> Result<u32, String> { Ok(eng()?.create()) }
@@ -293,6 +342,9 @@ pub fn run() {
         .setup(|app| {
             if let Some(m) = lab_media(app.handle()) { lab::setup(m); }
             engine::start(Some(app.handle().clone()));
+            // этап 5: перенос данных из Electron-версии — сам при первом запуске (решение владельца)
+            let h = app.handle().clone();
+            std::thread::Builder::new().name("pulse-migrate".into()).spawn(move || migrate::auto(&h)).ok();
             Ok(())
         })
         .register_asynchronous_uri_scheme_protocol("pulsetest", |ctx, req, responder| {
@@ -316,7 +368,7 @@ pub fn run() {
                 responder.respond(r);
             });
         })
-        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams, lab_ya_log, lab_ya_log_last, lab_ya_recent, lab_nav_log, ya_add, token_set, ya_login, engine_create, engine_drop, engine_open, engine_play, engine_pause, engine_seek, engine_volume, engine_rate, engine_state, engine_eq, engine_tap, engine_info, engine_stats, engine_devices, engine_set_device])
+        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams, lab_ya_log, lab_ya_log_last, lab_ya_recent, lab_nav_log, migrate_status, migrate_applied, migrate_restored, migrate_rerun, migrate_restore, social_get, social_set, ya_add, token_set, ya_login, engine_create, engine_drop, engine_open, engine_play, engine_pause, engine_seek, engine_volume, engine_rate, engine_state, engine_eq, engine_tap, engine_info, engine_stats, engine_devices, engine_set_device])
         .run(tauri::generate_context!())
         .expect("не удалось запустить Пульс (Tauri)");
 }

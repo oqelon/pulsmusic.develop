@@ -49,11 +49,18 @@
 <div class="hero">
   <div>
     <h1>Проверка звука на Tauri</h1>
-    <p class="sub">Тестовая сборка «Пульса», этапы 2–3. Ваш обычный «Пульс», его лайки, плейлисты и токен она не видит и не меняет.</p>
+    <p class="sub">Тестовая сборка «Пульса» на Tauri. Данные вашего обычного «Пульса» (Electron) она только читает — для переноса, — сам обычный «Пульс» и его папка не меняются.</p>
     <div class="env" id="env">…</div>
   </div>
   <button class="acc" id="openUi">Открыть «Пульс» с Яндексом</button>
 </div>
+
+<section>
+  <h2>Этап 5. Перенос данных из прежней версии</h2>
+  <p class="sub">При первом запуске программа сама скопировала данные обычного «Пульса» (Electron) в резервную копию и перенесла их: лайки, плейлисты, историю, статистику, настройки, токен Яндекса, ключи друзей. Сам обычный «Пульс» не тронут. Если macOS спросит доступ к «Pulse Safe Storage» — это ключ, которым Electron зашифровал токен и ключи друзей, нажмите «Разрешить».</p>
+  <div class="row"><button class="acc" id="mgRef">Обновить</button><button id="mgRun">Перенести заново</button><button id="mgBack">Вернуть, как было до переноса</button><span id="mgSt" class="mute"></span></div>
+  <div class="log" id="mgLog"></div>
+</section>
 
 <section>
   <h2>Опыт: сколько ещё звучит старое место после перемотки</h2>
@@ -794,6 +801,7 @@
           '; раскодирует: ' + (r.decode ? (r.decode.ok ? 'да, ' + r.decode.sr + ' Гц' : 'НЕТ ' + (r.decode.err || '')) : '—'),
       ].join('\n');
     };
+    L.push(''); L.push('— ЭТАП 5: ПЕРЕНОС ДАННЫХ ИЗ ELECTRON'); L.push(mgText(R.mig));
     var E = R.engine; L.push(''); L.push('— ЗВУКОВОЙ ДВИЖОК: СБОИ С ЗАПУСКА' + (E ? '' : ': нет данных (' + (R.engineErr || 'движок не запущен') + ')'));
     if (E) {
       L.push('Вывод: ' + (E.device || '—') + ', ' + E.rate + ' Гц, кусок ' + E.cb_frames + ' кадров, самый долгий расчёт ' + E.cb_max_ms + ' мс, запас ' + E.ahead_s + ' с');
@@ -830,9 +838,32 @@
     L.push(''); L.push('— ЖУРНАЛ'); L.push(R.logs.join('\n'));
     return L.join('\n');
   }
+  // ——— этап 5: перенос данных
+  var MG_ST = { 'none': 'ещё не было', 'no-electron': 'данных Electron на этом компьютере нет', 'pending': 'данные готовы — откройте «Пульс», чтобы они записались', 'applied': 'перенесено и проверено', 'applied-with-errors': 'перенесено, но с ошибками (см. ниже)', 'restore-pending': 'возврат готов — откройте «Пульс»', 'restored': 'возвращено, как было до переноса', 'error': 'ошибка' };
+  function mgText(m) {
+    if (!m) return 'нет сведений';
+    var L = ['Состояние: ' + (MG_ST[m.status] || m.status) + (m.at ? ' (' + new Date(m.at * 1000).toLocaleString('ru-RU') + ')' : '')];
+    if (m.electron) L.push('Папка Electron: ' + m.electron);
+    if (m.backup) L.push('Резервная копия: ' + m.backup.dir + ' — файлов ' + m.backup.files + ', ' + (m.backup.bytes / 1048576).toFixed(1) + ' МБ (' + (m.backup.items || []).join(', ') + ')');
+    if (m.ls) { L.push('Хранилище интерфейса: записей ' + m.ls.keys + ', ' + (m.ls.bytes / 1024).toFixed(0) + ' КБ'); (m.ls.items || []).forEach(function (x) { L.push('   ' + x.name + ': ' + x.v); }); }
+    if (m.applied) L.push('Записано в окно «Пульса»: ' + m.applied.written + (m.applied.bad && m.applied.bad.length ? '; НЕ записалось: ' + m.applied.bad.join('; ') : '; каждая запись проверена'));
+    if (m.token) L.push('Токен Яндекса: ' + m.token);
+    if (m.social) L.push('Ключи друзей: ' + m.social);
+    if (m.local) L.push('Своя музыка: ' + m.local);
+    if (m.error) L.push('Ошибка: ' + m.error);
+    (m.errors || []).forEach(function (e) { L.push('ОШИБКА: ' + e); });
+    L.push('Возврат «как было до переноса»: ' + (m.canRestore ? 'доступен' : 'пока нечего возвращать'));
+    return L.join('\n');
+  }
+  async function mgRefresh() { try { R.mig = await invoke('migrate_status'); $('mgLog').textContent = mgText(R.mig); $('mgSt').textContent = ''; } catch (e) { $('mgSt').textContent = 'Ошибка: ' + e; } }
+  $('mgRef').onclick = mgRefresh;
+  $('mgRun').onclick = async function () { $('mgSt').textContent = 'Переношу…'; try { await invoke('migrate_rerun'); } catch (e) { $('mgSt').textContent = 'Ошибка: ' + e; return; } await mgRefresh(); $('mgSt').textContent = 'Готово — откройте «Пульс» (если окно было открыто, оно открылось заново)'; };
+  $('mgBack').onclick = async function () { $('mgSt').textContent = 'Возвращаю…'; try { var r = await invoke('migrate_restore'); await mgRefresh(); $('mgSt').textContent = 'Готово' + (r && r.token ? '; токен: ' + r.token : '') + (r && r.social ? '; ключи друзей: ' + r.social : ''); } catch (e) { $('mgSt').textContent = 'Ошибка: ' + e; } };
+  setTimeout(mgRefresh, 400);
   async function engineStats() {
     try { R.engine = await invoke('engine_stats'); R.engineErr = null; } catch (e) { R.engine = null; R.engineErr = String(e); }
     try { R.navs = await invoke('lab_nav_log'); } catch (e) { R.navs = ['журнал недоступен: ' + e]; }
+    try { R.mig = await invoke('migrate_status'); } catch (e) {}
   }
   $('mkRep').onclick = async function () { await seekTimeline(); await engineStats(); $('rep').value = report(); $('repSt').textContent = 'Готово'; };
   $('copyRep').onclick = async function () {

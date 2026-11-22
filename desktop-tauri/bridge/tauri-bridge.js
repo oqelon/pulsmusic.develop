@@ -65,6 +65,33 @@
   // иначе демо-«токен» из них ушёл бы в Связку ключей. Касается только этой тестовой программы.
   try { if (localStorage.getItem('pulse.tauritest.seeded')) { localStorage.clear(); sessionStorage.clear(); } } catch (e) {}
 
+  // этап 5: перенос данных из Electron-версии (или возврат «как было»). Программа передаёт данные окну при его
+  // открытии — до запуска интерфейса, поэтому интерфейс сразу видит перенесённые лайки, плейлисты, историю,
+  // статистику и настройки. Каждая запись сверяется после записи; итог — программе (migrate_applied).
+  (function () {
+    var imp = window.__PULSE_IMPORT__, res = window.__PULSE_RESTORE__;
+    try { delete window.__PULSE_IMPORT__; delete window.__PULSE_RESTORE__; } catch (e) { window.__PULSE_IMPORT__ = window.__PULSE_RESTORE__ = undefined; }
+    var own = function (k) { return /^pulse\./.test(k) && !/^pulse\.tauritest\./.test(k) && k !== 'pulse.engine' && !/^pulse\.migrate/.test(k); };
+    var snap = function () { var o = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (own(k)) o[k] = localStorage.getItem(k); } return o; };
+    try {
+      if (res && res.ls) {
+        Object.keys(snap()).forEach(function (k) { localStorage.removeItem(k); });
+        Object.keys(res.ls).forEach(function (k) { if (own(k)) try { localStorage.setItem(k, String(res.ls[k])); } catch (e) {} });
+        enote('migrate', 'возврат «как было до переноса»: ' + Object.keys(res.ls).length + ' записей');
+        invoke('migrate_restored').catch(function (e) { enote('migrate', 'migrate_restored: ' + e); });
+      } else if (imp && imp.ls) {
+        var before = JSON.stringify(snap()), n = 0, bad = [];
+        Object.keys(imp.ls).forEach(function (k) {
+          if (!own(k)) return; var v = String(imp.ls[k]);
+          try { localStorage.setItem(k, v); } catch (e) { bad.push(k + ': ' + (e && e.name || e)); return; }
+          if (localStorage.getItem(k) !== v) bad.push(k + ': прочиталось не то'); else n++;
+        });
+        enote('migrate', 'перенос из Electron: записано ' + n + ', ошибок ' + bad.length);
+        invoke('migrate_applied', { stamp: String(imp.stamp || ''), before: before, n: n, bad: bad }).catch(function (e) { enote('migrate', 'migrate_applied: ' + e); });
+      }
+    } catch (e) { enote('migrate', 'перенос: ' + e); }
+  })();
+
   var token0 = typeof window.__PULSE_TOKEN__ === 'string' ? window.__PULSE_TOKEN__ : '';
   try { delete window.__PULSE_TOKEN__; } catch (e) { window.__PULSE_TOKEN__ = undefined; }
   try { enote('token', 'при открытии окна: ' + (window.__PULSE_TOKEN_INFO__ || 'нет сведений')); delete window.__PULSE_TOKEN_INFO__; } catch (e) {}
@@ -156,6 +183,9 @@
   // как app:version в Electron — функция, возвращающая обещание (Program.jsx вызывает window.pulse.version())
   P.version = function () { return Promise.resolve('0.38.0-tauri-test'); };
   P.initialToken = token0;
+  // аккаунт «Пульса» (друзья, чаты, «Искра»): ключи — в Связке ключей программы (как social.bin в Electron)
+  P.socialGet = function () { return invoke('social_get'); };
+  P.socialSet = function (p) { return invoke('social_set', { patch: p || {} }); };
   P.saveToken = function (t) { var v = tok(t); if (!tokOk(v)) { enote('token', 'не сохранён: ' + tokShape(v)); return Promise.resolve(false); } return invoke('token_set', { token: v }).then(function (where) { enote('token', 'сохранён: ' + where); return true; }, function (e) { enote('token', 'не сохранён: ' + e); return false; }); };
   P.openExternal = function (u) {
     u = String(u || '');

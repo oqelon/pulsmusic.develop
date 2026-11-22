@@ -18,9 +18,23 @@ global.__TAURI__ = { core: { invoke: async (c, a) => { calls.push(['invoke', c, 
     if (u.startsWith('https://lrclib.net')) return new Response('[]', { status: 200 });
     return new Response('{"error":{"message":"нет"}}', { status: 404 }); } } };
 global.__PULSE_TOKEN__ = 'TKN';
+// этап 5: перенос из Electron — записи pulse.* записываются до запуска интерфейса, служебные не трогаются
+global.__PULSE_IMPORT__ = { stamp: '77', ls: { 'pulse.likes': '[{"id":"1","title":"Танцуй"}]', 'pulse.settings': '{"theme":"light"}', 'pulse.tauritest.alive': 'ЧУЖОЕ', 'pulse.engine': 'off', 'other.key': 'x' } };
+store['pulse.settings'] = '{"theme":"dark"}'; store['pulse.tauritest.httplog'] = '[]';
+global.localStorage.removeItem = (k) => { delete store[k]; };
+Object.defineProperty(global.localStorage, 'length', { get: () => Object.keys(store).length });
+global.localStorage.key = (i) => Object.keys(store)[i];
 global.addEventListener = () => {}; global.location = { hash: '#/home', pathname: '/' }; global.document = { body: null }; global.setInterval = () => 0;
 eval(fs.readFileSync(process.argv[2], 'utf8'));
 (async () => {
+  {
+    assert.strictEqual(store['pulse.likes'], '[{"id":"1","title":"Танцуй"}]'); assert.strictEqual(store['pulse.settings'], '{"theme":"light"}');
+    assert.strictEqual(store['pulse.engine'], undefined, 'pulse.engine не переносится'); assert.strictEqual(store['other.key'], undefined); assert.strictEqual(store['pulse.tauritest.httplog'], '[]');
+    const ap = calls.find((c) => c[1] === 'migrate_applied'); assert.ok(ap, 'migrate_applied не вызван');
+    assert.strictEqual(ap[2].n, 2); assert.deepStrictEqual(ap[2].bad, []); assert.strictEqual(ap[2].stamp, '77');
+    assert.deepStrictEqual(JSON.parse(ap[2].before), { 'pulse.settings': '{"theme":"dark"}' }, 'прежние записи окна — для возврата');
+    assert.strictEqual(typeof global.__PULSE_IMPORT__, 'undefined');
+  }
   assert.strictEqual(pulse.initialToken, 'TKN'); assert.strictEqual(typeof global.__PULSE_TOKEN__, 'undefined');
   const a = await pulse.account('TKN'); assert.deepStrictEqual(a, { ok: true, v: { auth: true, uid: '42', login: 'x', plus: true }, tokenProblem: '' });
   const s = await pulse.stream('TKN', '123', 'lossless'); assert.strictEqual(s.ok, true); assert.strictEqual(s.v.url, 'pulseya://s/abc'); assert.strictEqual(s.v.lossless, true);
