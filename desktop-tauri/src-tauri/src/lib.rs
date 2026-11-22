@@ -259,6 +259,9 @@ async fn open_ui(app: tauri::AppHandle) -> Result<(), String> {
         .on_navigation({ let h = app.clone(); move |u| nav_guard(&h, u) });
     #[cfg(target_os = "macos")]
     let b = b.title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true);
+    // Windows: своя шапка, как в Electron (titleBarStyle hidden + кнопки поверх) — рамку убираем, кнопки рисует мост
+    #[cfg(target_os = "windows")]
+    let b = b.decorations(false).shadow(true);
     let win = b.build().map_err(|e| e.to_string())?;
     if max { let _ = win.maximize(); }
     // закрытие — запомнить размер и место (как window.json в Electron-версии)

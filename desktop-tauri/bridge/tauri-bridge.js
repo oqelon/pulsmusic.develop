@@ -309,6 +309,40 @@
     wavAbort: function (id) { return invoke('cdw_abort', { id: String(id) }); },
     reveal: function (p) { return invoke('cdw_reveal', { p: String(p || '') }); },
   };
+
+  // ——— шапка окна. В Electron полоса .win-drag таскала окно (-webkit-app-region), а на Windows системные кнопки
+  // «свернуть / развернуть / закрыть» рисовались поверх тёмного фона (titleBarOverlay, высота 40, значки #c7c7cc).
+  // В Tauri: полосе даём data-tauri-drag-region (таскание и двойной щелчок — развернуть), а на Windows рисуем те же
+  // кнопки сами — в стиле Windows 11, на том же месте и того же размера. Исходники интерфейса не меняются.
+  (function () {
+    var queued = false;
+    var mark = function () { queued = false; var l = document.querySelectorAll('.win-drag:not([data-tauri-drag-region])'); for (var i = 0; i < l.length; i++) l[i].setAttribute('data-tauri-drag-region', ''); };
+    var start = function () {
+      mark();
+      try { new MutationObserver(function () { if (!queued) { queued = true; requestAnimationFrame(mark); } }).observe(document.documentElement, { childList: true, subtree: true }); } catch (x) {}
+      if (!WIN) return;
+      var w = win(); if (!w) return;
+      var css = document.createElement('style');
+      css.textContent = '.pulse-cap{position:fixed;top:0;right:0;height:40px;display:flex;z-index:2147483000;-webkit-app-region:no-drag;user-select:none}' +
+        '.pulse-cap button{width:46px;height:40px;border:0;margin:0;padding:0;background:transparent;color:#c7c7cc;font:10px "Segoe Fluent Icons","Segoe MDL2 Assets";display:flex;align-items:center;justify-content:center;cursor:default;outline:none;transition:background-color .1s}' +
+        '.pulse-cap button:hover{background:rgba(255,255,255,.0605);color:#fff}.pulse-cap button:active{background:rgba(255,255,255,.0419)}' +
+        '.pulse-cap button.x:hover{background:#c42b1c;color:#fff}.pulse-cap button.x:active{background:#c83c31}' +
+        'html.pulse-fs .pulse-cap{display:none}';
+      document.head.appendChild(css);
+      var box = document.createElement('div'); box.className = 'pulse-cap';
+      var mk = function (glyph, title, cls, fn) { var b = document.createElement('button'); b.type = 'button'; b.textContent = glyph; b.title = title; if (cls) b.className = cls; b.addEventListener('click', function (e) { e.stopPropagation(); fn(); }); box.appendChild(b); return b; };
+      mk('', 'Свернуть', '', function () { w.minimize(); });
+      var mx = mk('', 'Развернуть', '', function () { w.toggleMaximize(); });
+      mk('', 'Закрыть', 'x', function () { w.close(); });
+      document.body.appendChild(box);
+      var sync = function () {
+        w.isMaximized().then(function (m) { mx.textContent = m ? '' : ''; mx.title = m ? 'Свернуть в окно' : 'Развернуть'; }).catch(function () {});
+        w.isFullscreen().then(function (f) { document.documentElement.classList.toggle('pulse-fs', !!f); }).catch(function () {});
+      };
+      sync(); try { w.onResized(sync); } catch (x) {}
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
+  })();
   P.onAiStatus = function () { return function () {}; };
   P.aiStatus = function () { return Promise.resolve(null); };
 

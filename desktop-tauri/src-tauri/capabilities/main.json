@@ -1,19 +1,36 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "Окно «Пульса» (этап 4): свои команды звука и токена; запросы — только к Яндексу и LRCLIB (тексты); ссылки открываются в браузере; во весь экран. Файлов и системы окно не видит.",
-  "windows": ["main"],
+  "description": "Окно «Пульса» (этап 4): свои команды звука и токена; запросы — только к Яндексу и LRCLIB (тексты); ссылки открываются в браузере; во весь экран. Файлов и системы окно не видит. Шапка окна: таскание, свернуть / развернуть / закрыть.",
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "allow-player",
     "core:default",
     "core:window:allow-set-fullscreen",
+    "core:window:allow-is-fullscreen",
+    "core:window:allow-is-maximized",
+    "core:window:allow-close",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-internal-toggle-maximize",
+    "core:window:allow-start-dragging",
     {
       "identifier": "http:default",
       "allow": [
-        { "url": "https://api.music.yandex.net" },
-        { "url": "https://*.yandex.net" },
-        { "url": "https://*.yandex.ru" },
-        { "url": "https://lrclib.net" }
+        {
+          "url": "https://api.music.yandex.net"
+        },
+        {
+          "url": "https://*.yandex.net"
+        },
+        {
+          "url": "https://*.yandex.ru"
+        },
+        {
+          "url": "https://lrclib.net"
+        }
       ]
     },
     "opener:default"
