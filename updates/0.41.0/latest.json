@@ -1,0 +1,17 @@
+{
+  "version": "0.41.0",
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.41.0/pulse-app-0.41.0.zip",
+  "sha256": "9fdc678332f69ee3456c6952c319a8160ad337fde1342f55bc4ef64c0d50c8e6",
+  "size": 1155194,
+  "minElectron": "33.2.1",
+  "date": "2026-11-23",
+  "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
+  "notes": [
+    "Карточка исполнителя: фото исполнителя видно целиком — голова больше не уходит за край",
+    "Новая шапка исполнителя и точки у популярных треков в альбоме — из 0.40",
+    "С обычного «Пульса» — переход на новую версию: данные и вход переносятся сами"
+  ],
+  "engine": "tauri",
+  "online": "https://pulse-online.pulsmusic.workers.dev",
+  "sig": "oanWIVz+JRuHTXW5NfnE4Wti9ffsDcqst/M0a8thap2G+Ny+0TcsDEP3b3TaxhR8epKVmK3w+kEHRrvKrmrJCA=="
+}
