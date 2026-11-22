@@ -21,6 +21,7 @@ mod library;
 mod localfile;
 mod migrate;
 mod resp;
+mod updater;
 mod yastream;
 
 use std::fs::File;
@@ -534,6 +535,36 @@ fn eng() -> Result<&'static engine::Engine, String> { engine::get().ok_or_else(|
 #[tauri::command] fn engine_devices() -> Vec<String> { engine::devices() }
 #[tauri::command] fn engine_set_device(name: String) -> Result<(), String> { eng()?.set_device(name); Ok(()) }
 
+// ——— обновления по воздуху (updater.rs), тот же формат ответов, что у upd:* в Electron-версии
+#[tauri::command]
+async fn upd_check(app: tauri::AppHandle) -> serde_json::Value {
+    let cur = app.package_info().version.to_string();
+    match updater::check(cur.clone()).await { Ok(v) => serde_json::json!({ "ok": true, "v": v }), Err(e) => serde_json::json!({ "ok": false, "error": e, "current": cur }) }
+}
+fn upd_progress(app: &tauri::AppHandle) -> impl Fn(f64, &str) + Send + Sync + 'static {
+    let a = app.clone();
+    move |f: f64, label: &str| { let _ = tauri::Emitter::emit(&a, "pulse-upd", serde_json::json!({ "f": f, "label": label })); }
+}
+#[tauri::command]
+async fn upd_prepare(app: tauri::AppHandle) -> serde_json::Value {
+    match updater::prepare(app.package_info().version.to_string(), upd_progress(&app)).await { Ok(v) => serde_json::json!({ "ok": true, "v": v }), Err(e) => serde_json::json!({ "ok": false, "error": e }) }
+}
+#[tauri::command]
+async fn upd_install(app: tauri::AppHandle) -> serde_json::Value {
+    let p = upd_progress(&app);
+    match updater::prepare(app.package_info().version.to_string(), upd_progress(&app)).await {
+        Ok(v) => { p(1.0, if v["admin"] == true { "Перезапуск — macOS попросит пароль, чтобы заменить программу" } else { "Перезапускаю" }); serde_json::json!({ "ok": true, "v": v }) }
+        Err(e) => serde_json::json!({ "ok": false, "error": e }),
+    }
+}
+#[tauri::command] fn upd_restart(app: tauri::AppHandle) { updater::restart(&app); }
+#[tauri::command] fn upd_ready() -> serde_json::Value { updater::ready() }
+/// лаборатория: тестовый канал обновлений (адрес тестовой ленты или null — обычный канал)
+#[tauri::command] fn upd_test_feed(url: Option<String>) -> Result<serde_json::Value, String> {
+    updater::set_test_feed(url)?;
+    Ok(serde_json::json!({ "feed": updater::test_feed(), "build": updater::build_no() }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -569,9 +600,10 @@ pub fn run() {
                 responder.respond(r);
             });
         })
-        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams, lab_ya_log, lab_ya_log_last, lab_ya_recent, lab_nav_log, local_list, local_pick, local_pick_files, local_add, local_remove, local_rescan, local_hide, local_unhide, local_reveal, dsd_info, pack_info, dsd_convert, migrate_status, migrate_applied, migrate_restored, migrate_rerun, migrate_restore, social_get, social_set, ya_add, token_set, ya_login, engine_create, engine_drop, engine_open, engine_play, engine_pause, engine_seek, engine_volume, engine_rate, engine_state, engine_eq, engine_tap, engine_info, engine_stats, engine_devices, engine_set_device])
-        .run(tauri::generate_context!())
-        .expect("не удалось запустить Пульс (Tauri)");
+        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams, lab_ya_log, lab_ya_log_last, lab_ya_recent, lab_nav_log, local_list, local_pick, local_pick_files, local_add, local_remove, local_rescan, local_hide, local_unhide, local_reveal, dsd_info, pack_info, dsd_convert, migrate_status, migrate_applied, migrate_restored, migrate_rerun, migrate_restore, social_get, social_set, ya_add, token_set, ya_login, engine_create, engine_drop, engine_open, engine_play, engine_pause, engine_seek, engine_volume, engine_rate, engine_state, engine_eq, engine_tap, engine_info, engine_stats, engine_devices, engine_set_device, upd_check, upd_prepare, upd_install, upd_restart, upd_ready, upd_test_feed])
+        .build(tauri::generate_context!())
+        .expect("не удалось запустить Пульс (Tauri)")
+        .run(|_app, ev| { if let tauri::RunEvent::Exit = ev { updater::on_exit(); } });
 }
 
 #[cfg(test)]

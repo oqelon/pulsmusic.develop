@@ -63,6 +63,15 @@
 </section>
 
 <section>
+  <h2>Этап 6.2. Обновления по воздуху</h2>
+  <p class="sub">Обычный канал — те же файлы обновлений, что у обычного «Пульса» (GitHub, подпись разработчика). Тестовый канал — тестовые сборки, подписанные тестовым ключом: проверяем, что программа сама скачивает новую сборку, проверяет подпись и контрольную сумму, меняет себя на новую и открывается. Данные, вход и настройки при этом не трогаются.</p>
+  <div class="row"><button class="acc" id="upChk">Проверить обычный канал</button><span id="upCur" class="mute"></span></div>
+  <div class="row"><input id="upFeed" placeholder="Адрес тестовой ленты (test-latest.json из релиза tauri-test-…)" style="flex:1;min-width:320px"><button id="upTest">Проверить тестовый канал</button></div>
+  <div class="row"><button id="upGet">Скачать и подготовить</button><button id="upGo">Перезапустить с новой версией</button><span id="upSt" class="mute"></span></div>
+  <div class="log" id="upLog"></div>
+</section>
+
+<section>
   <h2>DSD, APE и WavPack</h2>
   <p class="sub">Выберите файлы .dsf, .dff, .ape или .wv. DSD (SACD-рипы, Hi-Res) «Пульс» сам переводит в PCM 88,2 кГц (фильтр с подавлением ≥ 100 дБ, ровно до 24 кГц); «Сохранить как FLAC / WAV» — PCM 24 бит 88,2 кГц. APE и WavPack разжимает свой декодер программы (побитно как ffmpeg). Всё играет через свой звуковой движок. Те же файлы можно добавить и в «Свою музыку» в самом «Пульсе».</p>
   <div class="row"><button class="acc" id="dsdPick">Выбрать файлы</button><span id="dsdSt" class="mute"></span></div>
@@ -809,6 +818,7 @@
       ].join('\n');
     };
     L.push(''); L.push('— ЭТАП 5: ПЕРЕНОС ДАННЫХ ИЗ ELECTRON'); L.push(mgText(R.mig));
+    L.push(''); L.push('— ЭТАП 6.2: ОБНОВЛЕНИЯ' + (R.upd.length ? '' : ': не проверяли')); R.upd.forEach(function (x) { L.push(x); });
     L.push(''); L.push('— DSD, APE, WavPack' + (R.dsd.length ? '' : ': не проверяли'));
     R.dsd.forEach(function (f) { L.push(f.name + ': ' + (f.info ? f.info.kind + ' ' + (f.pack ? (f.info.level ? 'ур. ' + f.info.level + ' ' : '') + f.info.rate + ' Гц ' + (f.info.float ? 'float' : f.info.bits + ' бит') : f.info.grade) + ', ' + f.info.channels + ' кан., ' + fmtT(f.info.duration) : 'не открылся') + '; играл: ' + (f.played ? 'да' : '—') + (f.err ? '; ошибка: ' + f.err : '') + (f.flac ? '; FLAC: ' + f.flac : '') + (f.wav ? '; WAV: ' + f.wav : '')); });
     var E = R.engine; L.push(''); L.push('— ЗВУКОВОЙ ДВИЖОК: СБОИ С ЗАПУСКА' + (E ? '' : ': нет данных (' + (R.engineErr || 'движок не запущен') + ')'));
@@ -900,6 +910,25 @@
       })(f, row);
     }
   };
+
+  // ——— этап 6.2: обновления
+  R.upd = [];
+  function upLog(s) { log('upLog', s); R.upd.push(s); }
+  function upShow(r) {
+    if (!r) return 'нет ответа';
+    if (!r.ok) return 'ошибка: ' + r.error;
+    var v = r.v; return (v.test ? 'тестовый канал, сборка ' + v.build + ', ' : '') + 'в ленте ' + v.version + '; есть обновление: ' + (v.available ? 'да' : 'нет') + (v.size ? ', ' + (v.size / 1048576).toFixed(1) + ' МБ' : '') + (v.why ? ' (' + v.why + ')' : '') + (v.ready ? ', уже скачано' : '');
+  }
+  try { window.__TAURI__.event.listen('pulse-upd', function (e) { var p = e.payload || {}; $('upSt').textContent = (p.label || '') + ' ' + Math.round((p.f || 0) * 100) + ' %'; }); } catch (x) {}
+  $('upChk').onclick = async function () { try { await invoke('upd_test_feed', { url: null }); } catch (e) {} upLog('обычный канал: ' + upShow(await invoke('upd_check'))); };
+  $('upTest').onclick = async function () {
+    var u = $('upFeed').value.trim(); if (!u) { $('upSt').textContent = 'Вставьте адрес тестовой ленты'; return; }
+    try { var f = await invoke('upd_test_feed', { url: u }); upLog('тестовый канал: ' + f.feed + ' (эта сборка — ' + f.build + ')'); } catch (e) { upLog('тестовый канал не включился: ' + e); return; }
+    upLog('проверка: ' + upShow(await invoke('upd_check')));
+  };
+  $('upGet').onclick = async function () { $('upSt').textContent = 'Скачиваю…'; var t0 = performance.now(); var r = await invoke('upd_prepare'); upLog('скачать и подготовить: ' + (r.ok ? 'готово за ' + ((performance.now() - t0) / 1000).toFixed(1) + ' с, версия ' + r.v.version + (r.v.admin ? ' (нужен пароль для замены)' : '') : 'ошибка: ' + r.error)); $('upSt').textContent = r.ok ? 'Готово — можно перезапускать' : 'Ошибка'; };
+  $('upGo').onclick = async function () { upLog('перезапуск с новой версией'); try { localStorage.setItem('pulse.lab.updFrom', String(R.env && R.env.build)); } catch (x) {} await invoke('upd_restart'); };
+  setTimeout(function () { try { var from = localStorage.getItem('pulse.lab.updFrom'); if (from && R.env && String(R.env.build) !== from) { upLog('обновилась: была сборка ' + from + ', теперь ' + R.env.build); localStorage.removeItem('pulse.lab.updFrom'); } $('upCur').textContent = 'Эта сборка: ' + (R.env ? R.env.app + ' / tauri-test-' + R.env.build : '?'); } catch (x) {} }, 1200);
 
   // ——— этап 5: перенос данных
   var MG_ST = { 'none': 'ещё не было', 'no-electron': 'данных Electron на этом компьютере нет', 'pending': 'данные готовы — откройте «Пульс», чтобы они записались', 'applied': 'перенесено и проверено', 'applied-with-errors': 'перенесено, но с ошибками (см. ниже)', 'restore-pending': 'возврат готов — откройте «Пульс»', 'restored': 'возвращено, как было до переноса', 'error': 'ошибка' };

@@ -1,0 +1,7 @@
+{
+  "name": "pulse",
+  "productName": "Пульс",
+  "version": "0.38.0",
+  "engine": "tauri",
+  "build": 0
+}

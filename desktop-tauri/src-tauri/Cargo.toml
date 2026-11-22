@@ -34,6 +34,9 @@ keyring = { version = "3", features = ["apple-native", "windows-native"] }
 cbc = { version = "0.1", features = ["alloc"] }
 pbkdf2 = "0.12"
 sha1 = "0.10"
+# этап 6.2: обновления по воздуху — подпись разработчика (Ed25519, как updsign.js) и SHA-256 архива
+ed25519-dalek = "2"
+sha2 = "0.10"
 
 [profile.release]
 codegen-units = 1

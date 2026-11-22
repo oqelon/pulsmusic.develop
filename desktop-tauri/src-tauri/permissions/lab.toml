@@ -1,9 +1,9 @@
 [[permission]]
 identifier = "allow-lab"
 description = "Команды тестового окна «Лаборатория звука»: выбрать свои файлы, сохранить отчёт, сведения о системе, открыть интерфейс с демо-данными, тестовые потоки, формат звука Яндекса."
-commands.allow = ["pick_files", "save_report", "env_info", "open_ui", "ya_fmt", "lab_streams", "lab_ya_log", "lab_ya_log_last", "lab_ya_recent", "lab_nav_log", "dsd_info", "pack_info", "dsd_convert", "engine_create", "engine_drop", "engine_open", "engine_play", "engine_pause", "engine_seek", "engine_state", "engine_stats", "migrate_status", "migrate_rerun", "migrate_restore"]
+commands.allow = ["pick_files", "save_report", "env_info", "open_ui", "ya_fmt", "lab_streams", "lab_ya_log", "lab_ya_log_last", "lab_ya_recent", "lab_nav_log", "dsd_info", "pack_info", "dsd_convert", "engine_create", "engine_drop", "engine_open", "engine_play", "engine_pause", "engine_seek", "engine_state", "engine_stats", "migrate_status", "migrate_rerun", "migrate_restore", "upd_check", "upd_prepare", "upd_install", "upd_restart", "upd_ready", "upd_test_feed"]
 
 [[permission]]
 identifier = "allow-player"
 description = "Окно «Пульса»: зарегистрировать ссылку на звук Яндекса (ya_add), узнать её формат (ya_fmt), сохранить токен в Связке ключей (token_set)."
-commands.allow = ["ya_fmt", "ya_add", "token_set", "ya_login", "local_list", "local_pick", "local_pick_files", "local_add", "local_remove", "local_rescan", "local_hide", "local_unhide", "local_reveal", "migrate_applied", "migrate_restored", "social_get", "social_set", "engine_create", "engine_drop", "engine_open", "engine_play", "engine_pause", "engine_seek", "engine_volume", "engine_rate", "engine_state", "engine_eq", "engine_tap", "engine_info", "engine_stats", "engine_devices", "engine_set_device"]
+commands.allow = ["ya_fmt", "ya_add", "token_set", "ya_login", "local_list", "local_pick", "local_pick_files", "local_add", "local_remove", "local_rescan", "local_hide", "local_unhide", "local_reveal", "migrate_applied", "migrate_restored", "social_get", "social_set", "engine_create", "engine_drop", "engine_open", "engine_play", "engine_pause", "engine_seek", "engine_volume", "engine_rate", "engine_state", "engine_eq", "engine_tap", "engine_info", "engine_stats", "engine_devices", "engine_set_device", "upd_check", "upd_prepare", "upd_install", "upd_restart", "upd_ready"]

@@ -238,9 +238,20 @@
     w.onResized(function () { w.isFullscreen().then(function (v) { if (v !== last) { last = v; cb(!!v); } }); }).then(function (u) { if (dead) u(); else off = u; });
     return function () { dead = true; if (off) off(); };
   };
-  // обновлений у тестовой сборки нет
-  var never = function () { return new Promise(function () {}); };
-  P.update = { onProgress: function () { return function () {}; }, check: function () { return Promise.resolve({ ok: true, v: { available: false } }); }, install: never, restart: function () {}, prepare: never, ready: function () { return Promise.resolve(null); } };
+  // обновления по воздуху (updater.rs): те же ответы, что у upd:* в Electron-версии
+  var updErr = function (e) { return { ok: false, error: String((e && e.message) || e) }; };
+  P.update = {
+    check: function () { return invoke('upd_check').catch(updErr); },
+    install: function () { return invoke('upd_install').catch(updErr); },
+    prepare: function () { return invoke('upd_prepare').catch(updErr); },
+    restart: function () { return invoke('upd_restart').catch(function () {}); },
+    ready: function () { return invoke('upd_ready').catch(function () { return null; }); },
+    onProgress: function (cb) {
+      var off = null, dead = false;
+      try { T.event.listen('pulse-upd', function (e) { try { cb(e && e.payload); } catch (x) {} }).then(function (u) { if (dead) u(); else off = u; }); } catch (x) {}
+      return function () { dead = true; if (off) off(); };
+    },
+  };
   P.onAiStatus = function () { return function () {}; };
   P.aiStatus = function () { return Promise.resolve(null); };
 

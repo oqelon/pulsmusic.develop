@@ -39,7 +39,11 @@ jobs:
         env:
           CI: 'true'
           PULSE_BUILD: ${{ github.run_number }}
-        run: npx --yes @tauri-apps/cli@2 build --target aarch64-apple-darwin --bundles app,dmg --ci
+        run: |
+          # Contents/Resources/app/package.json: версия, движок и номер сборки — по нему проверяют обновления
+          # (и Tauri-версия, и «новый движок» обычного «Пульса»)
+          node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json','utf8'));const p={name:'pulse',productName:'Пульс',version:c.version,engine:'tauri',build:+process.env.PULSE_BUILD};fs.writeFileSync('app-meta/package.json',JSON.stringify(p,null,2)+'\n');console.log(p)"
+          npx --yes @tauri-apps/cli@2 build --target aarch64-apple-darwin --bundles app,dmg --ci
       - name: Упаковка
         id: pk
         run: |
@@ -51,6 +55,8 @@ jobs:
           DMG="$(ls "$B"/dmg/*.dmg 2>/dev/null | head -1 || true)"
           [ -n "$DMG" ] && cp "$DMG" out/Pulse-Tauri-Test-Mac-Apple-M.dmg
           codesign -dv --verbose=2 "$APP" 2>&1 | head -20 || true
+          cat "$APP/Contents/Resources/app/package.json"
+          codesign --verify --deep "$APP" && echo "codesign --verify --deep: ок"
           du -sh "$APP" out/*
           echo "app_mb=$(du -sm "$APP" | cut -f1)" >> "$GITHUB_OUTPUT"
       - name: Предварительный релиз
