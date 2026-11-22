@@ -411,6 +411,46 @@ pub fn read_meta(r: &mut dyn Rs, size: u64, ext: &str) -> Meta {
     m.unwrap_or_else(|| Meta { codec: audio_codec(ext).unwrap_or("").to_string(), ..Default::default() })
 }
 
+// ——— «WAV для CD» и запись диска: отдельные файлы, не из библиотеки (перенос adhocOne / folderAudio из local.js) ———
+/// сведения об отдельном файле для окна: { id: "cdw:x…", file: "x…", title, artist, album, n, dur, fmt, size, name, path }
+/// или { err, name, path }. Номер файла (file) — как у Electron: «x» + отпечаток пути.
+pub fn adhoc_one(p: &str) -> Value {
+    let name = base(p).to_string();
+    let ext = ext_of(p);
+    let bad = |e: &str| json!({ "err": e, "name": name, "path": p });
+    if ext == "wma" { return bad("формат WMA не поддерживается — сохраните файл в FLAC или WAV другой программой"); }
+    let Ok(md) = std::fs::metadata(p) else { return bad("файл не найден или недоступен") };
+    if !md.is_file() || md.len() == 0 { return bad("файл пустой"); }
+    let Ok(mut f) = File::open(p) else { return bad("не удалось прочитать файл: нет доступа") };
+    let m = read_meta(&mut f, md.len(), &ext);
+    let t = |k: &str| m.tags.get(k).cloned().unwrap_or_default();
+    let title = { let x = t("TITLE"); if !x.is_empty() { x } else { strip_num(&stem(p)) } };
+    let artist = { let a = t("ARTIST"); if !a.is_empty() { a } else { t("ALBUMARTIST") } };
+    let codec = if m.codec.is_empty() { ext.to_uppercase() } else { m.codec.clone() };
+    let id = format!("x{}", fid(p));
+    json!({ "id": format!("cdw:{id}"), "file": id, "title": title, "artist": artist, "album": t("ALBUM"), "n": num(&t("TRACKNUMBER")), "dur": m.dur.max(0.0),
+        "fmt": { "codec": codec, "sr": m.sr, "bits": m.bits, "ch": m.ch, "kbps": m.kbps, "vbr": m.vbr }, "size": md.len(), "name": name, "path": p })
+}
+/// «01 - Название» → «Название» (номер в начале имени файла)
+fn strip_num(s: &str) -> String {
+    let b = s.as_bytes();
+    let d = b.iter().take_while(|c| c.is_ascii_digit()).count();
+    if (1..=3).contains(&d) {
+        let sep = b[d..].iter().take_while(|c| matches!(c, b' ' | b'.' | b'-' | b'_' | b'\t')).count();
+        if sep > 0 && d + sep < b.len() { return s[d + sep..].to_string(); }
+    }
+    s.to_string()
+}
+/// все звуковые файлы папки (с вложенными), по порядку имён: «2 …» раньше «10 …»
+pub fn folder_audio(root: &str) -> Vec<String> {
+    let mut all = Vec::new();
+    walk(root, &mut all, 0);
+    let mut out: Vec<String> = all.into_iter().map(|e| e.p).filter(|p| { let e = ext_of(p); audio_codec(&e).is_some() || matches!(e.as_str(), "aif" | "aiff" | "aifc") }).collect();
+    out.sort_by(|a, b| natural_cmp(&a.to_lowercase(), &b.to_lowercase()));
+    out.dedup();
+    out
+}
+
 // ——— CUE ———
 #[derive(Debug, Clone, Default)]
 pub struct CueTrack { pub n: u32, pub tags: BTreeMap<String, String>, pub start: f64 }

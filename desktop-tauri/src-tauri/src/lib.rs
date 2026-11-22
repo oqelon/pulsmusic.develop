@@ -12,8 +12,10 @@
 // «Пульс» на Electron, его настройки, лайки и токен она не видит и не трогает.
 
 mod apewv;
+mod cd;
 mod dsd;
 mod engine;
+mod extras;
 mod flacw;
 mod lab;
 mod ldb;
@@ -565,6 +567,92 @@ async fn upd_install(app: tauri::AppHandle) -> serde_json::Value {
     Ok(serde_json::json!({ "feed": updater::test_feed(), "build": updater::build_no() }))
 }
 
+// ——— запись CD и «WAV для CD» (cd.rs): перенос burn.js, cdwav.js, local:piece
+fn data_dir(app: &tauri::AppHandle) -> PathBuf { app.path().app_data_dir().unwrap_or_else(|_| std::env::temp_dir().join("pulse-tauri")) }
+#[tauri::command]
+async fn cd_piece(file: String, s: f64, e: f64) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || cd::piece(&file, s, e)).await.map_err(|e| e.to_string())?.map(tauri::ipc::Response::new)
+}
+#[tauri::command] async fn cd_drives() -> serde_json::Value { tauri::async_runtime::spawn_blocking(cd::drives).await.unwrap_or_else(|e| serde_json::json!({ "ok": false, "err": e.to_string() })) }
+#[tauri::command] fn cd_begin(n: u32) -> serde_json::Value { cd::begin(n) }
+fn raw_body<'a>(r: &'a tauri::ipc::Request<'_>) -> &'a [u8] { match r.body() { tauri::ipc::InvokeBody::Raw(b) => b, _ => &[] } }
+fn hdr(r: &tauri::ipc::Request<'_>, k: &str) -> String { r.headers().get(k).and_then(|v| v.to_str().ok()).unwrap_or("").to_string() }
+#[tauri::command]
+fn cd_put(request: tauri::ipc::Request<'_>) -> serde_json::Value {
+    cd::put(&hdr(&request, "x-id"), hdr(&request, "x-i").parse().unwrap_or(0), raw_body(&request), hdr(&request, "x-mode").parse().unwrap_or(0))
+}
+#[tauri::command]
+async fn cd_burn(app: tauri::AppHandle, id: String, o: serde_json::Value) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move || cd::burn(&id, &o, &|v| { let _ = tauri::Emitter::emit(&app, "pulse-cd", v); })).await.unwrap_or_else(|e| serde_json::json!({ "ok": false, "err": e.to_string() }))
+}
+#[tauri::command] async fn cd_eject(d: String) -> bool { tauri::async_runtime::spawn_blocking(move || cd::eject(&d)).await.unwrap_or(false) }
+#[tauri::command] fn cd_cancel() -> bool { cd::cancel() }
+fn adhoc(paths: Vec<String>) -> serde_json::Value {
+    let (mut ok, mut bad) = (Vec::new(), Vec::new());
+    for p in paths.into_iter().take(2000) {
+        let v = library::adhoc_one(&p);
+        if let Some(f) = v["file"].as_str() { localfile::register(f, localfile::Src::File(PathBuf::from(&p))); ok.push(v); } else { bad.push(v); }
+    }
+    serde_json::json!({ "ok": ok, "bad": bad })
+}
+const CDW_EXT: &[&str] = &["flac", "mp3", "m4a", "aac", "ogg", "oga", "opus", "wav", "ape", "wv", "aiff", "aif", "aifc", "wma", "webm", "dsf", "dff"];
+#[tauri::command]
+async fn cdw_pick_files(app: tauri::AppHandle) -> serde_json::Value {
+    let Some(list) = app.dialog().file().set_title("Аудиофайлы").add_filter("Аудио", CDW_EXT).blocking_pick_files() else { return serde_json::Value::Null };
+    let paths: Vec<String> = list.into_iter().filter_map(|f| f.into_path().ok()).map(|p| p.to_string_lossy().to_string()).collect();
+    tauri::async_runtime::spawn_blocking(move || adhoc(paths)).await.unwrap_or(serde_json::Value::Null)
+}
+#[tauri::command]
+async fn cdw_pick_folder(app: tauri::AppHandle) -> serde_json::Value {
+    let Some(d) = app.dialog().file().set_title("Папка с музыкой").blocking_pick_folder().and_then(|f| f.into_path().ok()) else { return serde_json::Value::Null };
+    let root = d.to_string_lossy().to_string();
+    tauri::async_runtime::spawn_blocking(move || { let mut v = adhoc(library::folder_audio(&root)); v["folder"] = serde_json::json!(root); v }).await.unwrap_or(serde_json::Value::Null)
+}
+#[tauri::command]
+async fn cdw_add_paths(paths: Vec<String>) -> serde_json::Value { tauri::async_runtime::spawn_blocking(move || adhoc(paths)).await.unwrap_or(serde_json::Value::Null) }
+#[tauri::command]
+async fn cdw_pick_out(app: tauri::AppHandle, cur: Option<String>) -> Option<String> {
+    let mut d = app.dialog().file().set_title("Куда сохранить WAV").set_can_create_directories(true);
+    if let Some(c) = cur.filter(|c| !c.is_empty()) { d = d.set_directory(c); }
+    let p = d.blocking_pick_folder().and_then(|f| f.into_path().ok())?;
+    cd::clean_parts(&p);
+    Some(p.to_string_lossy().to_string())
+}
+#[tauri::command] fn cdw_open(dir: String, name: String, mode: Option<String>) -> serde_json::Value { cd::wav_open(&dir, &name, mode.as_deref().unwrap_or("number")) }
+#[tauri::command] fn cdw_write(request: tauri::ipc::Request<'_>) -> serde_json::Value { cd::wav_write(&hdr(&request, "x-id"), raw_body(&request)) }
+#[tauri::command] fn cdw_finish(id: String, n: u64) -> serde_json::Value { cd::wav_finish(&id, n) }
+#[tauri::command] fn cdw_abort(id: String) -> bool { cd::wav_abort(&id) }
+#[tauri::command]
+fn cdw_reveal(p: String) -> bool {
+    let pb = PathBuf::from(&p);
+    if !pb.is_absolute() { return false; }
+    #[cfg(target_os = "macos")] { let mut c = std::process::Command::new("/usr/bin/open"); if p.to_lowercase().ends_with(".wav") { c.arg("-R"); } let _ = c.arg(&pb).spawn(); }
+    true
+}
+
+// ——— Discord, «Сейчас онлайн», режим разработчика, сведения о компьютере (extras.rs)
+#[tauri::command] fn discord_enable(v: bool) -> String { extras::discord_enable(v) }
+#[tauri::command] fn discord_set(t: serde_json::Value) -> String { extras::discord_set(t) }
+#[tauri::command] fn discord_state() -> String { extras::discord_state() }
+#[tauri::command] async fn online_get() -> serde_json::Value { extras::online_count().await }
+#[tauri::command] async fn dev_unlock(pw: String) -> serde_json::Value { tauri::async_runtime::spawn_blocking(move || extras::dev_unlock(&pw)).await.unwrap_or_else(|_| serde_json::json!({ "ok": false })) }
+#[tauri::command]
+fn dev_devtools(window: tauri::WebviewWindow) -> serde_json::Value {
+    if !extras::dev_ok() { return serde_json::json!({ "ok": false }); }
+    window.open_devtools();
+    serde_json::json!({ "ok": true })
+}
+#[tauri::command] async fn perf_info(app: tauri::AppHandle) -> serde_json::Value { let d = data_dir(&app); tauri::async_runtime::spawn_blocking(move || extras::perf(&d)).await.unwrap_or(serde_json::Value::Null) }
+#[tauri::command] fn perf_slow(app: tauri::AppHandle, v: bool) -> bool { extras::perf_slow(&data_dir(&app), v); true }
+#[tauri::command] fn perf_unsafe(app: tauri::AppHandle) -> bool { extras::perf_unsafe(&data_dir(&app)); true }
+#[tauri::command] fn perf_relaunch(app: tauri::AppHandle) { app.restart(); }
+#[tauri::command] async fn audio_cors(url: String) -> bool { extras::audio_cors(&url).await }
+#[tauri::command]
+fn app_version(app: tauri::AppHandle) -> serde_json::Value {
+    let b = updater::build_no();
+    serde_json::json!({ "version": if b > 0 { format!("{} (Tauri, тест №{b})", app.package_info().version) } else { app.package_info().version.to_string() }, "engine": "tauri", "tauri": tauri::VERSION, "electron": "", "packaged": true })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -577,6 +665,11 @@ pub fn run() {
             // этап 5: перенос данных из Electron-версии — сам при первом запуске (решение владельца)
             let h = app.handle().clone();
             std::thread::Builder::new().name("pulse-migrate".into()).spawn(move || { migrate::auto(&h); lib_start(&h); }).ok();
+            // этап 6.3: временные файлы прошлой записи CD, Discord, «Сейчас онлайн», батарея
+            cd::cleanup_all();
+            extras::discord_start(app.handle().clone(), SOCIAL_URL);
+            extras::online_start(data_dir(app.handle()), migrate::electron_dir());
+            extras::power_watch(app.handle().clone());
             Ok(())
         })
         .register_asynchronous_uri_scheme_protocol("pulsetest", |ctx, req, responder| {
@@ -600,10 +693,10 @@ pub fn run() {
                 responder.respond(r);
             });
         })
-        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams, lab_ya_log, lab_ya_log_last, lab_ya_recent, lab_nav_log, local_list, local_pick, local_pick_files, local_add, local_remove, local_rescan, local_hide, local_unhide, local_reveal, dsd_info, pack_info, dsd_convert, migrate_status, migrate_applied, migrate_restored, migrate_rerun, migrate_restore, social_get, social_set, ya_add, token_set, ya_login, engine_create, engine_drop, engine_open, engine_play, engine_pause, engine_seek, engine_volume, engine_rate, engine_state, engine_eq, engine_tap, engine_info, engine_stats, engine_devices, engine_set_device, upd_check, upd_prepare, upd_install, upd_restart, upd_ready, upd_test_feed])
+        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams, lab_ya_log, lab_ya_log_last, lab_ya_recent, lab_nav_log, local_list, local_pick, local_pick_files, local_add, local_remove, local_rescan, local_hide, local_unhide, local_reveal, dsd_info, pack_info, dsd_convert, migrate_status, migrate_applied, migrate_restored, migrate_rerun, migrate_restore, social_get, social_set, ya_add, token_set, ya_login, engine_create, engine_drop, engine_open, engine_play, engine_pause, engine_seek, engine_volume, engine_rate, engine_state, engine_eq, engine_tap, engine_info, engine_stats, engine_devices, engine_set_device, upd_check, upd_prepare, upd_install, upd_restart, upd_ready, upd_test_feed, cd_piece, cd_drives, cd_begin, cd_put, cd_burn, cd_eject, cd_cancel, cdw_pick_files, cdw_pick_folder, cdw_add_paths, cdw_pick_out, cdw_open, cdw_write, cdw_finish, cdw_abort, cdw_reveal, discord_enable, discord_set, discord_state, online_get, dev_unlock, dev_devtools, perf_info, perf_slow, perf_unsafe, perf_relaunch, audio_cors, app_version])
         .build(tauri::generate_context!())
         .expect("не удалось запустить Пульс (Tauri)")
-        .run(|_app, ev| { if let tauri::RunEvent::Exit = ev { updater::on_exit(); } });
+        .run(|_app, ev| { if let tauri::RunEvent::Exit = ev { cd::on_exit(); updater::on_exit(); } });
 }
 
 #[cfg(test)]

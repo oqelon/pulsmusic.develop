@@ -11,7 +11,7 @@ global.window = global; Object.defineProperty(global, 'navigator', { value: { us
 const store = {}; global.localStorage = { getItem: (k) => store[k] || null, setItem: (k, v) => { store[k] = v; }, clear() {} }; global.sessionStorage = { clear() {} };
 const calls = [];
 const J = (o) => new Response(JSON.stringify({ result: o }), { status: 200 });
-global.__TAURI__ = { core: { invoke: async (c, a) => { calls.push(['invoke', c, a]); return c === 'ya_add' ? 'pulseya://s/abc' : null; } },
+global.__TAURI__ = { core: { invoke: async (c, a, o) => { calls.push(['invoke', c, a, o]); return c === 'ya_add' ? 'pulseya://s/abc' : c === 'app_version' ? { version: '0.38.0 (Tauri, тест №1)', engine: 'tauri' } : c === 'cd_piece' ? new Uint8Array([1, 82, 73, 70, 70]).buffer : null; } },
   http: { fetch: async (u, o) => { calls.push(['fetch', u, (o && o.headers) || {}]);
     if (u.includes('/account/status')) return J({ account: { uid: 42, login: 'x' }, plus: { hasPlus: true } });
     if (u.includes('/get-file-info')) return J({ downloadInfo: { urls: ['https://strm.yandex.net/a'], key: '00112233445566778899aabbccddeeff', codec: 'flac-mp4', bitrate: 0, quality: 'lossless' } });
@@ -64,6 +64,12 @@ eval(fs.readFileSync(process.argv[2], 'utf8'));
   calls.length = 0; await pulse.openExternal('https://oauth.yandex.ru/authorize?response_type=token&client_id=x'); assert.ok(calls.some((c) => c[1] === 'ya_login'));
   console.error(new Error('проба OAuth y0_SECRET'));
   const el = JSON.parse(store['pulse.tauritest.errors']); assert.ok(el.some((x) => x.k === 'console' && x.m.includes('[токен]') && !x.m.includes('SECRET')), 'журнал ошибок прячет токен');
-  assert.strictEqual(typeof (await pulse.version()), 'string');
+  // как app:version в Electron: объект с полем version (страница «Программа» показывает ver.version)
+  assert.strictEqual(typeof (await pulse.version()).version, 'string');
+  // кусок звука для CD: первый байт — «кусок с s» или «файл целиком», дальше данные
+  const pc = await pulse.cd.piece('f1', 12.5, 20); assert.ok(pc.ok && pc.seg && pc.at === 12.5); assert.strictEqual(Buffer.from(pc.data).toString('latin1'), 'RIFF');
+  // звук кусками — сырыми байтами, номер задания и трека — в заголовках
+  calls.length = 0; await pulse.cd.put('j1', 3, new Uint8Array([1, 2, 3, 4]).buffer, 1);
+  const put = calls.find((c) => c[1] === 'cd_put'); assert.ok(put[2] instanceof Uint8Array && put[2].length === 4);
   console.log('мост: все проверки пройдены (' + calls.length + ' вызовов)');
 })().catch((e) => { console.error(e); process.exit(1); });

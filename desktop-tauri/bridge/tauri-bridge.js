@@ -186,7 +186,7 @@
   var win = function () { return T.window && T.window.getCurrentWindow ? T.window.getCurrentWindow() : null; };
   P.platform = MAC ? 'darwin' : WIN ? 'win32' : 'linux';
   // как app:version в Electron — функция, возвращающая обещание (Program.jsx вызывает window.pulse.version())
-  P.version = function () { return Promise.resolve('0.38.0-tauri-test'); };
+  P.version = function () { return invoke('app_version').catch(function () { return { version: '0.38.0 (Tauri)' }; }); };
   P.initialToken = token0;
   // аккаунт «Пульса» (друзья, чаты, «Искра»): ключи — в Связке ключей программы (как social.bin в Electron)
   P.socialGet = function () { return invoke('social_get'); };
@@ -197,6 +197,14 @@
     T.event.listen('tauri://drag-drop', function (e) {
       var ps = (e && e.payload && e.payload.paths) || []; if (!ps.length) return;
       dropAt = Date.now(); dropPaths = ps;
+      // открыта «Запись CD» — файлы идут в список диска, а не в «Мою музыку»: окну передаём обычное событие drop
+      // (страница сама вызовет cd.addFiles, пути возьмутся отсюда)
+      var cdp = document.querySelector('.cd-page');
+      if (cdp) {
+        try { var dt = new DataTransfer(); ps.forEach(function (p) { dt.items.add(new File([], String(p).split(/[\\/]/).pop() || 'file')); }); cdp.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt })); }
+        catch (x) { enote('cd', 'перетаскивание: ' + x); }
+        return;
+      }
       // перетащили музыку или папки на окно — добавляем в «Мою музыку» (как перетаскивание в Electron-версии)
       invoke('local_add', { paths: ps.slice(0, 200) }).then(function (n) { if (n) enote('local', 'перетащено: добавлено ' + n); }).catch(function (x) { enote('local', 'перетаскивание: ' + x); });
     });
@@ -251,6 +259,55 @@
       try { T.event.listen('pulse-upd', function (e) { try { cb(e && e.payload); } catch (x) {} }).then(function (u) { if (dead) u(); else off = u; }); } catch (x) {}
       return function () { dead = true; if (off) off(); };
     },
+  };
+
+  // ——— этап 6.3: то, что в Electron делал главный процесс (cd.rs, extras.rs); ответы — как у Electron-версии
+  var listen = function (ev, cb) {
+    var off = null, dead = false;
+    try { T.event.listen(ev, function (e) { try { cb(e && e.payload); } catch (x) {} }).then(function (u) { if (dead) u(); else off = u; }); } catch (x) {}
+    return function () { dead = true; if (off) off(); };
+  };
+  P.discord = {
+    enable: function (v) { return invoke('discord_enable', { v: !!v }).catch(function () { return 'off'; }); },
+    set: function (t) { return invoke('discord_set', { t: t && typeof t === 'object' ? t : null }).catch(function () { return 'off'; }); },
+    state: function () { return invoke('discord_state').catch(function () { return 'off'; }); },
+    onState: function (f) { return listen('pulse-discord', f); },
+  };
+  P.openDevTools = function () { return invoke('dev_devtools').catch(function () { return { ok: false }; }); };
+  P.devUnlock = function (pw) { return invoke('dev_unlock', { pw: String(pw || '') }); };
+  P.online = function () { return invoke('online_get').catch(function () { return { ok: false, error: 'Нет ответа' }; }); };
+  P.perf = function () { return invoke('perf_info'); };
+  P.perfSlow = function (v) { return invoke('perf_slow', { v: !!v }).catch(function () { return false; }); };
+  P.perfUnsafe = function () { return invoke('perf_unsafe').catch(function () { return false; }); };
+  P.relaunch = function () { return invoke('perf_relaunch').catch(function () {}); };
+  P.audioCors = function (u) { return invoke('audio_cors', { url: String(u || '') }).catch(function () { return false; }); };
+  P.onPower = function (cb) { return listen('pulse-power', function (v) { cb(!!v); }); };
+  // запись CD и «WAV для CD»: звук кусками — сырыми байтами (без перевода в JSON)
+  var ab = function (d) { return d instanceof ArrayBuffer ? new Uint8Array(d) : ArrayBuffer.isView(d) ? new Uint8Array(d.buffer, d.byteOffset, d.byteLength) : new Uint8Array(0); };
+  P.cd = {
+    drives: function () { return invoke('cd_drives'); },
+    begin: function (n) { return invoke('cd_begin', { n: n | 0 }); },
+    put: function (id, i, data, mode) { return invoke('cd_put', ab(data), { headers: { 'x-id': String(id), 'x-i': String(i | 0), 'x-mode': String(mode | 0) } }).catch(function (e) { return { ok: false, err: String(e) }; }); },
+    burn: function (id, o) { return invoke('cd_burn', { id: String(id), o: o || {} }); },
+    eject: function (d) { return invoke('cd_eject', { d: String(d == null ? '' : d) }); },
+    cancel: function () { return invoke('cd_cancel'); },
+    onProgress: function (cb) { return listen('pulse-cd', cb); },
+    pickFiles: function () { return invoke('cdw_pick_files'); },
+    pickFolder: function () { return invoke('cdw_pick_folder'); },
+    // перетащенные в окно файлы: пути пришли от программы (tauri://drag-drop), окну они не видны
+    addFiles: function () { var ps = Date.now() - dropAt < 3000 ? dropPaths.slice(0, 2000) : []; dropAt = 0; return invoke('cdw_add_paths', { paths: ps }); },
+    pickOut: function (cur) { return invoke('cdw_pick_out', { cur: typeof cur === 'string' ? cur : null }); },
+    piece: function (file, s, e) {
+      return invoke('cd_piece', { file: String(file), s: +s || 0, e: +e || 0 }).then(function (buf) {
+        var u = new Uint8Array(buf); var seg = u[0] === 1;
+        return { ok: true, seg: seg, at: seg ? Math.max(0, +s || 0) : 0, data: u.slice(1).buffer };
+      }, function (er) { return { ok: false, err: String((er && er.message) || er) }; });
+    },
+    wavOpen: function (dir, name, mode) { return invoke('cdw_open', { dir: String(dir || ''), name: String(name || ''), mode: mode || null }); },
+    wavWrite: function (id, data) { return invoke('cdw_write', ab(data), { headers: { 'x-id': String(id) } }).catch(function (e) { return { ok: false, err: String(e) }; }); },
+    wavFinish: function (id, n) { return invoke('cdw_finish', { id: String(id), n: Math.max(0, n | 0) }); },
+    wavAbort: function (id) { return invoke('cdw_abort', { id: String(id) }); },
+    reveal: function (p) { return invoke('cdw_reveal', { p: String(p || '') }); },
   };
   P.onAiStatus = function () { return function () {}; };
   P.aiStatus = function () { return Promise.resolve(null); };

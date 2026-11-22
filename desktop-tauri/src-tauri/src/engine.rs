@@ -507,6 +507,67 @@ fn open_track(url: &str) -> Result<(Track, f64), (String, String)> {
     Ok((Track { body: Body::Sym { format, dec, track_id, tb: p.time_base }, sr, skip_until: None, rs: None, pend: [Vec::new(), Vec::new()], good: 0, bad: 0 }, dur))
 }
 
+/// Кусок звука для записи CD и «WAV для CD» (перенос local:piece): [s, e) секунд файла → стерео f32 с частотой out
+/// (e ≤ s — до конца файла). Ровно с s — та же точная перемотка, что при воспроизведении; частота пересчитывается
+/// с учётом задержки фильтра, поэтому куски склеиваются по номерам отсчётов без сдвига. При той же частоте — как есть
+/// (16 и 24 бит переходят бит в бит). За концом файла — пусто. Любой формат, который играет движок (в том числе APE,
+/// WavPack, DSD, ALAC, OGG).
+pub fn render_piece(url: &str, s: f64, e: f64, out: u32) -> Result<[Vec<f32>; 2], String> {
+    let (mut t, _) = open_track(url).map_err(|(_, m)| m)?;
+    if s > 0.0 && t.seek_to(s).is_err() { return Ok([Vec::new(), Vec::new()]); }
+    let (mut sr, mut need, mut got_in, mut skips) = (0u32, None::<usize>, 0usize, 0u32);
+    let mut rs: Option<SincFixedIn<f32>> = None;
+    let mut pend: [Vec<f32>; 2] = [Vec::new(), Vec::new()];
+    let mut o: [Vec<f32>; 2] = [Vec::new(), Vec::new()];
+    loop {
+        match t.next_pcm() {
+            Next::Pcm(mut a, mut b) => {
+                skips = 0;
+                if sr == 0 {
+                    sr = t.sr.max(1);
+                    if e > s { need = Some(((e - s) * sr as f64).round() as usize); }
+                    if sr != out { rs = Some(SincFixedIn::<f32>::new(out as f64 / sr as f64, 1.0, sinc(), RS_CHUNK, 2).map_err(|e| e.to_string())?); }
+                }
+                if let Some(n) = need { let left = n.saturating_sub(got_in); if a.len() > left { a.truncate(left); b.truncate(left); } }
+                got_in += a.len();
+                match rs.as_mut() {
+                    None => { o[0].extend_from_slice(&a); o[1].extend_from_slice(&b); }
+                    Some(r) => {
+                        pend[0].extend_from_slice(&a); pend[1].extend_from_slice(&b);
+                        while pend[0].len() >= r.input_frames_next() {
+                            let k = r.input_frames_next();
+                            let x = r.process(&[&pend[0][..k], &pend[1][..k]], None).map_err(|e| e.to_string())?;
+                            o[0].extend_from_slice(&x[0]); o[1].extend_from_slice(&x[1]);
+                            pend[0].drain(..k); pend[1].drain(..k);
+                        }
+                    }
+                }
+                if need.map_or(false, |n| got_in >= n) { break; }
+                if got_in > 6 * 3600 * 400_000 { return Err("кусок слишком длинный".into()); }
+            }
+            Next::Skip => { skips += 1; if skips > 5000 { break; } }
+            Next::Eof => break,
+            Next::Err(_, m) => { if got_in == 0 { return Err(m); } break; }
+        }
+    }
+    if let Some(r) = rs.as_mut() {
+        let delay = r.output_delay();
+        let want = (got_in as f64 * out as f64 / sr as f64).round() as usize;
+        if !pend[0].is_empty() {
+            let x = r.process_partial(Some(&[&pend[0][..], &pend[1][..]]), None).map_err(|e| e.to_string())?;
+            o[0].extend_from_slice(&x[0]); o[1].extend_from_slice(&x[1]);
+        }
+        for _ in 0..16 {
+            if o[0].len() >= want + delay { break; }
+            let x = r.process_partial::<&[f32]>(None, None).map_err(|e| e.to_string())?;
+            if x[0].is_empty() { break; }
+            o[0].extend_from_slice(&x[0]); o[1].extend_from_slice(&x[1]);
+        }
+        for c in o.iter_mut() { c.drain(..delay.min(c.len())); c.truncate(want); }
+    }
+    Ok(o)
+}
+
 fn sinc() -> SincInterpolationParameters {
     SincInterpolationParameters { sinc_len: 128, f_cutoff: 0.95, interpolation: SincInterpolationType::Cubic, oversampling_factor: 128, window: WindowFunction::BlackmanHarris2 }
 }
@@ -1120,6 +1181,29 @@ mod tests {
             let Next::Pcm(l, _) = t.next_pcm() else { panic!("{name}: после перемотки нет звука") };
             let at = (0.75 * rate as f64).round() as usize;
             assert_eq!(&l[..64], &want[at..at + 64], "{name}: перемотка не туда");
+        }
+    }
+
+    #[test]
+    fn pieces_join_without_shift() {
+        let lab = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../lab-media");
+        // 44,1 кГц — бит в бит; 96 кГц — пересчёт частоты, стык двух кусков совпадает с целым куском
+        for (name, id) in [("flac-16-44.flac", "pc-44"), ("flac-24-96.flac", "pc-96"), ("ape-s16-5000-3990.ape", "pc-ape")] {
+            crate::localfile::register(id, crate::localfile::Src::File(lab.join(name)));
+            let url = format!("pulsefile://a/{id}");
+            assert_eq!(render_piece(&url, 0.2, 1.4, 44100).unwrap()[0].len(), 52920, "{name}: длина");
+            let mut whole = render_piece(&url, 0.2, 1.5, 44100).unwrap();
+            whole[0].truncate(52920);
+            // с запасом с обеих сторон, как делает окно: кусок 0,2–0,8 с берём из 0,2–0,9, второй 0,8–1,4 — из 0,7–1,5
+            let a = render_piece(&url, 0.2, 0.9, 44100).unwrap();
+            let b = render_piece(&url, 0.7, 1.5, 44100).unwrap();
+            let joined: Vec<f32> = a[0][..26460].iter().copied().chain(b[0][4410..4410 + 26460].iter().copied()).collect();
+            let err = whole[0].iter().zip(&joined).map(|(x, y)| (x - y).abs()).fold(0f32, f32::max);
+            assert_eq!(joined.len(), whole[0].len(), "{name}: длина склейки");
+            if name.contains("-44") || name.contains("ape") { assert_eq!(err, 0.0, "{name}: 44,1 кГц должно быть бит в бит"); }
+            else { assert!(err < 2e-3, "{name}: стык сдвинут, ошибка {err}"); }
+            let end = render_piece(&url, 9999.0, 0.0, 44100).unwrap();
+            assert!(end[0].is_empty(), "{name}: за концом файла должно быть пусто");
         }
     }
 
