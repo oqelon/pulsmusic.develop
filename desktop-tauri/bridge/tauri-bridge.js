@@ -66,7 +66,7 @@
         }, function (x) { e.err = 'ответ не прочитался: ' + String((x && x.message) || x).slice(0, 160); note(e); throw x; });
       }
       note(e); return r;
-    }, function (err) { e.ms = Date.now() - t0; e.err = String((err && err.message) || err).slice(0, 200); note(e); throw err; });
+    }, function (err) { e.ms = Date.now() - t0; e.err = String((err && err.message) || err).replace(/y0_[\w-]+|OAuth [\w-]+/g, '[токен]').slice(0, 200); if (h.Authorization) e.err += ' (токен: ' + tokShape(String(h.Authorization).slice(6)) + ')'; note(e); throw err; });
   }
 
   // yandex.js вызывает ys.add({ urls, key, codec }) → адрес pulseya:// (регистрирует программа)
@@ -75,11 +75,32 @@
     yaAdd: function (o) { return invoke('ya_add', { urls: [].concat((o && o.urls) || []), key: (o && o.key) || null, codec: (o && o.codec) || null }); },
   };
 
+  // Токен из поля ввода: на Mac в него попадало что-то длиннее 4096 символов, и заголовок Authorization с таким
+  // значением WebKit отвергал сразу («Type error»). Достаём сам токен: из адреса после access_token=, либо токен
+  // вида y0_… / AQAAAA… из любого текста, без пробелов и переносов. Сам токен никуда не пишется — в журнал
+  // попадает только его «форма»: длина, есть ли не-латинские символы, пробелы, на что похоже.
+  function tokShape(t) {
+    t = String(t || '');
+    return 'длина ' + t.length + (/[^\x20-\x7e]/.test(t) ? ', есть не-латинские/служебные символы' : '') + (/\s/.test(t) ? ', есть пробелы/переносы' : '') +
+      (/access_token=/.test(t) ? ', адрес с access_token' : /^y0_/.test(t) ? ', вид y0_' : /^AQAA/.test(t) ? ', вид AQAA' : ', вид неизвестен');
+  }
+  var shapes = {};
+  function tok(t) {
+    var raw = String(t || ''), v = raw;
+    var m = raw.match(/access_token=([^&\s#"'<>]+)/);
+    if (m) v = m[1];
+    else { var k = raw.match(/(?:^|[^A-Za-z0-9_-])((?:y0_|AQAAAA)[A-Za-z0-9_-]{20,})/); if (k) v = k[1]; else v = raw.replace(/\s+/g, ''); }
+    try { v = decodeURIComponent(v); } catch (x) {}
+    if (raw && !shapes[raw.length]) { shapes[raw.length] = 1; if (v !== raw) enote('token', 'введено: ' + tokShape(raw) + ' → взят токен: ' + tokShape(v)); }
+    return v;
+  }
+
   var P = {};
   // как ym:<метод> в main.js: { ok, v, tokenProblem } или { ok: false, error }
   ['account', 'search', 'chart', 'artist', 'artistInfo', 'album', 'wave', 'waveFeedback', 'stream', 'lyrics', 'landing', 'playlist', 'likes', 'tracksById', 'likeSet'].forEach(function (m) {
     P[m] = function () {
-      var args = arguments;
+      var args = Array.prototype.slice.call(arguments);
+      if (args.length) args[0] = tok(args[0]);
       return Promise.resolve().then(function () { return ya[m].apply(ya, args); })
         .then(function (v) { return { ok: true, v: v, tokenProblem: ya.tokenProblem() }; })
         .catch(function (e) { console.log('[ym]', m, '→', e && e.message); return { ok: false, error: String((e && e.message) || e) }; });
@@ -91,7 +112,7 @@
   // как app:version в Electron — функция, возвращающая обещание (Program.jsx вызывает window.pulse.version())
   P.version = function () { return Promise.resolve('0.38.0-tauri-test'); };
   P.initialToken = token0;
-  P.saveToken = function (t) { return invoke('token_set', { token: String(t || '') }); };
+  P.saveToken = function (t) { var v = tok(t); if (v.length > 4096) { enote('token', 'не сохранён: ' + tokShape(v)); return Promise.resolve(false); } return invoke('token_set', { token: v }); };
   P.openExternal = function (u) {
     u = String(u || '');
     if (!/^https:\/\//i.test(u)) return Promise.resolve(false);

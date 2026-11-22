@@ -35,6 +35,13 @@ eval(fs.readFileSync(process.argv[2], 'utf8'));
   for (const c of calls.filter((x) => x[0] === 'fetch')) assert.strictEqual(c[2].Origin, '', 'Origin должен быть пустым: ' + c[1]);
   const log = JSON.parse(store['pulse.tauritest.httplog']); const acc = log.find((x) => /account\/status$/.test(x.u));
   assert.ok(acc && acc.uid === true && acc.st === 200, 'журнал account/status'); assert.ok(!JSON.stringify(log).includes('TKN'), 'токен попал в журнал');
+  // токен из адреса и из «мусора» вокруг
+  calls.length = 0;
+  await pulse.account('https://music.yandex.ru/#access_token=y0_AbcdefGHIJKLMNOPQRSTUVWX123&token_type=bearer');
+  assert.strictEqual(calls.find((c) => c[0] === 'fetch')[2].Authorization, 'OAuth y0_AbcdefGHIJKLMNOPQRSTUVWX123');
+  calls.length = 0;
+  await pulse.account('Токен:\n y0_AbcdefGHIJKLMNOPQRSTUVWX123 \nконец');
+  assert.strictEqual(calls.find((c) => c[0] === 'fetch')[2].Authorization, 'OAuth y0_AbcdefGHIJKLMNOPQRSTUVWX123');
   console.error(new Error('проба OAuth y0_SECRET'));
   const el = JSON.parse(store['pulse.tauritest.errors']); assert.ok(el.some((x) => x.k === 'console' && x.m.includes('[токен]') && !x.m.includes('SECRET')), 'журнал ошибок прячет токен');
   assert.strictEqual(typeof (await pulse.version()), 'string');
