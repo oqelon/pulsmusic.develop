@@ -73,7 +73,7 @@ fn copy_tree(from: &Path, to: &Path, files: &mut u64, bytes: &mut u64) -> Result
     }
     Ok(())
 }
-const ITEMS: [&str; 8] = ["Local Storage", "secure-token.bin", "social.bin", "local-library.json", "local-covers", "window.json", "perf.json", "online-id"];
+const ITEMS: [&str; 9] = ["Local Storage", "Local State", "secure-token.bin", "social.bin", "local-library.json", "local-covers", "window.json", "perf.json", "online-id"];
 
 // ——— safeStorage Electron ———
 #[cfg(target_os = "macos")]
@@ -92,13 +92,53 @@ fn safe_key() -> Result<Vec<u8>, String> {
     }
     Err(format!("ключ «Pulse Safe Storage» в Связке ключей не получен ({last})"))
 }
-#[cfg(not(target_os = "macos"))]
+// Windows: ключ AES-256 лежит в «Local State» Electron (os_crypt.encrypted_key, base64, «DPAPI» + данные),
+// зашифрованный DPAPI учётной записи Windows — расшифровывается только под тем же пользователем на этом компьютере.
+#[cfg(target_os = "windows")]
+fn safe_key() -> Result<Vec<u8>, String> {
+    let dir = electron_dir().ok_or("нет папки Electron")?;
+    let ls = read_json(&dir.join("Local State")).ok_or("нет файла «Local State» Electron")?;
+    let raw = crate::updater::b64(ls["os_crypt"]["encrypted_key"].as_str().ok_or("в «Local State» нет ключа шифрования")?).ok_or("ключ шифрования повреждён")?;
+    let enc = raw.strip_prefix(b"DPAPI").ok_or("ключ шифрования не DPAPI")?;
+    let k = dpapi::unprotect(enc)?;
+    if k.len() != 32 { return Err(format!("ключ шифрования не того размера ({} байт)", k.len())); }
+    Ok(k)
+}
+#[cfg(target_os = "windows")]
+pub mod dpapi {
+    use windows_sys::Win32::Foundation::LocalFree;
+    use windows_sys::Win32::Security::Cryptography::{CryptProtectData, CryptUnprotectData, CRYPT_INTEGER_BLOB};
+    fn call(data: &[u8], protect: bool) -> Result<Vec<u8>, String> {
+        let inb = CRYPT_INTEGER_BLOB { cbData: data.len() as u32, pbData: data.as_ptr() as *mut u8 };
+        let mut out = CRYPT_INTEGER_BLOB { cbData: 0, pbData: std::ptr::null_mut() };
+        let ok = unsafe {
+            if protect { CryptProtectData(&inb, std::ptr::null(), std::ptr::null(), std::ptr::null(), std::ptr::null(), 0, &mut out) }
+            else { CryptUnprotectData(&inb, std::ptr::null_mut(), std::ptr::null(), std::ptr::null(), std::ptr::null(), 0, &mut out) }
+        };
+        if ok == 0 || out.pbData.is_null() { return Err("DPAPI: не расшифровалось (данные другого пользователя Windows?)".into()); }
+        let v = unsafe { std::slice::from_raw_parts(out.pbData, out.cbData as usize).to_vec() };
+        unsafe { LocalFree(out.pbData as _); }
+        Ok(v)
+    }
+    pub fn unprotect(data: &[u8]) -> Result<Vec<u8>, String> { call(data, false) }
+    #[allow(dead_code)]
+    pub fn protect(data: &[u8]) -> Result<Vec<u8>, String> { call(data, true) }
+}
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn safe_key() -> Result<Vec<u8>, String> { Err("расшифровка данных Electron на этой системе ещё не сделана — нужен повторный вход".into()) }
 
-/// macOS: "v10" + AES-128-CBC (IV — 16 пробелов, PKCS#7), ключ — PBKDF2-SHA1(пароль из Связки, "saltysalt", 1003)
+/// macOS: "v10" + AES-128-CBC (IV — 16 пробелов, PKCS#7), ключ — PBKDF2-SHA1(пароль из Связки, "saltysalt", 1003).
+/// Windows: "v10" + 12 байт nonce + AES-256-GCM (метка 16 байт), ключ — из «Local State» (DPAPI). Различаются по длине ключа.
 pub fn safe_decrypt_with(key: &[u8], data: &[u8]) -> Result<String, String> {
     use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, KeyIvInit};
     let body = data.strip_prefix(b"v10").ok_or("неизвестный формат шифрования (нет v10)")?;
+    if key.len() == 32 {
+        use aes_gcm::aead::{Aead, KeyInit};
+        if body.len() < 12 + 16 { return Err("зашифрованные данные короче нужного".into()); }
+        let c = aes_gcm::Aes256Gcm::new_from_slice(key).map_err(|e| e.to_string())?;
+        let pt = c.decrypt(aes_gcm::Nonce::from_slice(&body[..12]), &body[12..]).map_err(|_| "не расшифровалось (ключ не подошёл)".to_string())?;
+        return String::from_utf8(pt).map_err(|_| "расшифровалось не в текст".into());
+    }
     if key.len() != 16 { return Err("ключ не того размера".into()); }
     let pt = cbc::Decryptor::<aes::Aes128>::new_from_slices(key, &[b' '; 16]).map_err(|e| e.to_string())?
         .decrypt_padded_vec_mut::<Pkcs7>(body).map_err(|_| "не расшифровалось (ключ не подошёл)".to_string())?;
@@ -329,6 +369,14 @@ mod tests {
         let mut bad = ct.clone(); let n = bad.len(); bad[n - 1] ^= 1;
         assert!(safe_decrypt_with(&k, &bad).is_err());
         assert!(safe_decrypt_with(&k, b"v11abc").is_err());
+        // Windows (AES-256-GCM, вектор Node: ключ i*7+3, nonce 01..0c)
+        let k32: Vec<u8> = (0..32u8).map(|i| i.wrapping_mul(7).wrapping_add(3)).collect();
+        let g = hex("7631300102030405060708090a0b0c2912252284d6be6f3d7f1690ab9d6103f119731198d11516d90b7bd974700f0696e775eae724f15a5b0198567fc1651442");
+        assert_eq!(safe_decrypt_with(&k32, &g).unwrap(), "y0_ТестовыйТокен-123");
+        let mut g2 = g.clone(); let n = g2.len(); g2[n - 1] ^= 1;
+        assert!(safe_decrypt_with(&k32, &g2).is_err(), "подменённая метка GCM должна не пройти");
+        #[cfg(target_os = "windows")]
+        { let p = dpapi::protect(&k32).unwrap(); assert_ne!(p, k32); assert_eq!(dpapi::unprotect(&p).unwrap(), k32); }
     }
     fn hex(s: &str) -> Vec<u8> { (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect() }
 

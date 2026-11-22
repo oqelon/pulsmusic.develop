@@ -48,7 +48,7 @@ fn st() -> std::sync::MutexGuard<'static, St> { ST.lock().unwrap_or_else(|e| e.i
 
 // ——— подписи ———
 
-fn b64(s: &str) -> Option<Vec<u8>> {
+pub(crate) fn b64(s: &str) -> Option<Vec<u8>> {
     let mut out = Vec::new();
     let (mut acc, mut n) = (0u32, 0u32);
     for c in s.bytes() {
