@@ -423,7 +423,12 @@ impl Track {
     }
 }
 
+// счётчики для проверок и журнала: пакеты, ошибки декодирования, чужие дорожки, выданные кадры
+pub static DBG: [AtomicU64; 4] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+fn dbg(i: usize, n: u64) { DBG[i].fetch_add(n, Ordering::Relaxed); }
+
 fn push(v: &Voice, l: &[f32], r: &[f32]) {
+    dbg(3, l.len() as u64);
     if l.is_empty() { return; }
     if let Ok(mut b) = v.buf.lock() {
         b.reserve(l.len() * 2);
@@ -499,11 +504,12 @@ fn decoder_thread(v: Arc<Voice>, sh: Arc<Shared>, rx: Receiver<Cmd>) {
             Err(SymErr::IoError(e)) => { set_err(&v, "network", e.to_string()); continue; }
             Err(e) => { set_err(&v, "decode", e.to_string()); continue; }
         };
-        if pkt.track_id() != tr.track_id { continue; }
+        dbg(0, 1);
+        if pkt.track_id() != tr.track_id { dbg(2, 1); continue; }
         let pkt_t = match tr.tb { Some(tb) => { let t = tb.calc_time(pkt.ts()); t.seconds as f64 + t.frac } None => pkt.ts() as f64 / tr.sr as f64 };
         let decoded = match tr.dec.decode(&pkt) {
             Ok(b) => b,
-            Err(SymErr::DecodeError(_)) => continue,
+            Err(SymErr::DecodeError(e)) => { dbg(1, 1); if DBG[1].load(Ordering::Relaxed) < 5 { eprintln!("[engine] декодер: {e}"); } continue; }
             Err(e) => { set_err(&v, "decode", e.to_string()); continue; }
         };
         let spec = *decoded.spec();
@@ -761,7 +767,8 @@ mod tests {
             let hz = z / (l.len() as f64 / 48000.0);
             (hz - 300.0) / 60.0
         };
-        assert!(sec_now(&v).abs() < 0.6, "в начале звучит секунда {}", sec_now(&v));
+        let dbgs = || format!("пакеты {}, ошибки {}, чужие {}, кадры {}, eof {}, буфер {}, ошибка {:?}", DBG[0].load(Ordering::Relaxed), DBG[1].load(Ordering::Relaxed), DBG[2].load(Ordering::Relaxed), DBG[3].load(Ordering::Relaxed), v.eof.load(Ordering::Relaxed), v.buf.lock().unwrap().len(), v.error.lock().unwrap());
+        assert!(sec_now(&v).abs() < 0.6, "в начале звучит секунда {}; {}", sec_now(&v), dbgs());
         for target in [20.3, 5.3, 27.3, 12.3] {
             v.seeking.store(true, Ordering::Relaxed); v.flush();
             tx.send(Cmd::Seek(target)).unwrap();
@@ -773,6 +780,28 @@ mod tests {
             assert!((v.position(48000) - target).abs() < 0.01);
         }
         tx.send(Cmd::Stop).unwrap();
+    }
+
+    // каждый формат: открыть и раскодировать первые пакеты (без потоков)
+    #[test]
+    fn decode_formats() {
+        let mut bad = Vec::new();
+        for f in ["mp3-320.mp3", "aac-256.m4a", "flac-16-44.flac", "flac-24-96.flac", "flac-in-mp4.m4a", "alac-16-44.m4a", "wav-16-44.wav", "ogg-vorbis.ogg", "aiff-16-44.aif", "seek-tone.m4a"] {
+            let id = format!("dec-{f}");
+            crate::localfile::register(&id, crate::localfile::Src::File(lab(f)));
+            let r = (|| -> Result<(usize, usize, String), String> {
+                let (mut t, d) = open_track(&format!("pulsefile://a/{id}")).map_err(|(k, m)| format!("{k}: {m}"))?;
+                let (mut frames, mut errs, mut first) = (0usize, 0usize, String::new());
+                for _ in 0..60 {
+                    let p = match t.format.next_packet() { Ok(p) => p, Err(e) => { if first.is_empty() { first = format!("next_packet: {e}"); } break; } };
+                    if p.track_id() != t.track_id { continue; }
+                    match t.dec.decode(&p) { Ok(b) => frames += b.frames(), Err(e) => { errs += 1; if first.is_empty() { first = format!("decode: {e}"); } } }
+                }
+                Ok((frames, errs, format!("{first}; длина {d:.2}")))
+            })();
+            match r { Ok((fr, _, _)) if fr > 1000 => {}, Ok((fr, er, m)) => bad.push(format!("{f}: кадров {fr}, ошибок {er}, {m}")), Err(e) => bad.push(format!("{f}: {e}")) }
+        }
+        assert!(bad.is_empty(), "не декодируются: {bad:#?}");
     }
 
     #[test]
