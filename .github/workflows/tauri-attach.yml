@@ -1,0 +1,56 @@
+# Подписанные файлы Tauri-версии → в релиз. Разработчик подписывает сборки своим ключом (desktop-tauri/tools/sign-release.py)
+# и кладёт mac.json и win.json в updates/<версия>/. Установленная Tauri-версия ищет их рядом с пакетом из latest.json —
+# в релизе v<версия>. Здесь подписи сверяются открытым ключом (тем же, что в программе), размеры и SHA-256 — со сборками
+# в релизе, и только тогда файлы прикрепляются к релизу. Закрытого ключа на GitHub нет — workflow только переносит файлы.
+name: Tauri — подписи в релиз
+on:
+  push:
+    branches: [main]
+    paths: ['updates/*/win.json', 'updates/*/mac.json']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  attach:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Проверить и прикрепить
+        run: |
+          set -e
+          for w in updates/*/win.json; do
+            D=$(dirname "$w"); VER=$(basename "$D")
+            node -e 'process.exit(require(process.argv[1]).engine === "tauri" ? 0 : 1)' "$PWD/$w" || { echo "$VER: не Tauri — пропускаю"; continue; }
+            gh release view "v$VER" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || { echo "$VER: нет релиза — пропускаю"; continue; }
+            rm -rf /tmp/rel && mkdir -p /tmp/rel
+            gh release download "v$VER" -R "$GITHUB_REPOSITORY" -p 'Pulse-*' -D /tmp/rel
+            node -e '
+              const c = require("crypto"), fs = require("fs"), [d, v] = process.argv.slice(1);
+              const KEY = "0YOwoaasY+1McD/zRxs0yNs3eywt/TCfmjYyMDkCuIs=";
+              const pub = c.createPublicKey({ key: { kty: "OKP", crv: "Ed25519", x: Buffer.from(KEY, "base64").toString("base64url") }, format: "jwk" });
+              const ok = (msg, sig) => c.verify(null, Buffer.from(msg), pub, Buffer.from(sig || "", "base64"));
+              const chk = (tag, arch, a, file) => {
+                const b = fs.readFileSync("/tmp/rel/" + file);
+                const sha = c.createHash("sha256").update(b).digest("hex");
+                if (a.sha256 !== sha || a.size !== b.length) throw new Error(file + ": не совпадает со сборкой в релизе");
+                if (!a.url.endsWith("/v" + v + "/" + file)) throw new Error(file + ": адрес не из релиза v" + v);
+                if (!ok([tag, v, arch, a.sha256, String(a.size)].join("\n"), a.sig)) throw new Error(file + ": подпись не сошлась");
+              };
+              const m = require(d + "/mac.json"), w = require(d + "/win.json");
+              if (m.version !== v || w.version !== v) throw new Error("версия в файлах не совпадает с папкой");
+              chk("PULSE-MAC-V1", "arm64", m.arm64, "Pulse-Mac-Apple-M.zip");
+              chk("PULSE-MAC-V1", "x64", m.x64, "Pulse-Mac-Intel.zip");
+              chk("PULSE-WIN-V1", "x64", w.x64, "Pulse-Windows-Setup.exe");
+              console.log(v + ": подписи и сборки сходятся");
+            ' "$PWD/$D" "$VER"
+            F="$D/mac.json $D/win.json"
+            [ -f "$D/latest.json" ] && F="$F $D/latest.json"
+            [ -f "$D/pulse-app-$VER.zip" ] && F="$F $D/pulse-app-$VER.zip"
+            gh release upload "v$VER" $F -R "$GITHUB_REPOSITORY" --clobber
+            echo "$VER: прикреплено — $F"
+          done
