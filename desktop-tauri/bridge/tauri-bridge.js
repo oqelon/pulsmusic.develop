@@ -56,12 +56,14 @@
     var t0 = Date.now(), e = { at: new Date().toISOString().slice(11, 19), m: o.method || 'GET', u: where(u), auth: !!h.Authorization, sent: Object.keys(h).filter(function (k) { return k !== 'Authorization'; }).join(',') };
     return T.http.fetch(u, Object.assign({}, o, { headers: h })).then(function (r) {
       e.st = r.status; e.ms = Date.now() - t0;
-      // для /account/status — узнал ли Яндекс аккаунт (номер не пишем)
+      // для /account/status — узнал ли Яндекс аккаунт (номер не пишем). Ответ читаем ОДИН раз и отдаём yandex.js
+      // новый Response с тем же текстом: clone() у ответа плагина в WebKit, похоже, ломал вход («Яндекс не отвечает»).
       if (/\/account\/status$/.test(e.u)) {
-        return r.clone().text().then(function (t) {
-          try { var d = JSON.parse(t); e.uid = !!(d && d.result && d.result.account && d.result.account.uid); e.keys = Object.keys((d && d.result) || d || {}).slice(0, 8).join(','); if (d && d.error) e.err = String(d.error.name || '') + ' ' + String(d.error.message || '').slice(0, 120); } catch (x) { e.err = 'не JSON: ' + t.slice(0, 80); }
-          note(e); return r;
-        });
+        return r.text().then(function (t) {
+          try { var d = JSON.parse(t); e.uid = !!(d && d.result && d.result.account && d.result.account.uid); e.keys = Object.keys((d && d.result) || d || {}).slice(0, 8).join(','); if (d && d.error) e.err = String(d.error.name || '') + ' ' + String(d.error.message || '').slice(0, 120); } catch (x) { e.err = 'не JSON: ' + String(t).slice(0, 80); }
+          note(e);
+          return new Response(t, { status: r.status, statusText: r.statusText, headers: r.headers });
+        }, function (x) { e.err = 'ответ не прочитался: ' + String((x && x.message) || x).slice(0, 160); note(e); throw x; });
       }
       note(e); return r;
     }, function (err) { e.ms = Date.now() - t0; e.err = String((err && err.message) || err).slice(0, 200); note(e); throw err; });

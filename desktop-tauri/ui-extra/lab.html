@@ -690,7 +690,7 @@
 
   $('openUi').onclick = function () { invoke('open_ui').catch(function (e) { $('env').textContent = 'Не открылся интерфейс: ' + e; }); };
 
-  invoke('env_info').then(function (v) { R.env = v; $('env').textContent = (v.os === 'macos' ? 'macOS ' : v.os + ' ') + (v.osVersion || '') + ' · ' + v.arch + ' · сборка ' + v.app + ' · Tauri ' + v.tauri; })
+  invoke('env_info').then(function (v) { R.env = v; $('env').textContent = (v.os === 'macos' ? 'macOS ' : v.os + ' ') + (v.osVersion || '') + ' · ' + v.arch + ' · tauri-test-' + (v.build || '?') + ' (' + v.app + ')' + ' · Tauri ' + v.tauri; })
     .catch(function (e) { $('env').textContent = 'Сведения о системе недоступны: ' + e; });
   sysInfo();
 })();

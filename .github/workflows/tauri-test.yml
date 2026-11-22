@@ -38,6 +38,7 @@ jobs:
         working-directory: desktop-tauri
         env:
           CI: 'true'
+          PULSE_BUILD: ${{ github.run_number }}
         run: npx --yes @tauri-apps/cli@2 build --target aarch64-apple-darwin --bundles app,dmg --ci
       - name: Упаковка
         id: pk

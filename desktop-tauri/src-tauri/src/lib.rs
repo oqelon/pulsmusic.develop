@@ -100,7 +100,7 @@ fn env_info(app: tauri::AppHandle) -> serde_json::Value {
             os_ver = String::from_utf8_lossy(&o.stdout).trim().to_string();
         }
     }
-    serde_json::json!({ "os": std::env::consts::OS, "osVersion": os_ver, "arch": std::env::consts::ARCH, "app": app.package_info().version.to_string(), "tauri": tauri::VERSION })
+    serde_json::json!({ "os": std::env::consts::OS, "osVersion": os_ver, "arch": std::env::consts::ARCH, "app": app.package_info().version.to_string(), "build": option_env!("PULSE_BUILD").unwrap_or("местная"), "tauri": tauri::VERSION })
 }
 
 fn token_get() -> String {
