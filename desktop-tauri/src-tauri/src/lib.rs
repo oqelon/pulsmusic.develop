@@ -11,6 +11,7 @@
 // CD, Discord, обновления (этап 6). Данные этой сборки хранятся отдельно (ru.pulse.desktop.tauritest) — обычный
 // «Пульс» на Electron, его настройки, лайки и токен она не видит и не трогает.
 
+mod aether;
 mod engine;
 mod lab;
 mod localfile;
@@ -279,6 +280,8 @@ fn eng() -> Result<&'static engine::Engine, String> { engine::get().ok_or_else(|
 #[tauri::command] fn engine_state(v: u32) -> Result<Option<engine::VoiceState>, String> { Ok(eng()?.state(v)) }
 #[tauri::command] fn engine_eq(on: bool, g: Vec<f32>, pre: f32, lim: bool) -> Result<(), String> { eng()?.set_eq(on, g, pre, lim); Ok(()) }
 #[tauri::command] fn engine_tap(n: usize) -> Result<Vec<f32>, String> { Ok(eng()?.tap(n)) }
+#[tauri::command] fn engine_aether(on: bool) -> Result<(), String> { eng()?.set_aether(on); Ok(()) }
+#[tauri::command] fn engine_aether_state() -> Result<serde_json::Value, String> { Ok(eng()?.aether_state()) }
 #[tauri::command] fn engine_stats() -> Result<serde_json::Value, String> { Ok(eng()?.stats()) }
 #[tauri::command] fn engine_info() -> Result<serde_json::Value, String> { let e = eng()?; Ok(serde_json::json!({ "rate": e.out_rate(), "device": e.device_now() })) }
 #[tauri::command] fn engine_devices() -> Vec<String> { engine::devices() }
@@ -316,7 +319,7 @@ pub fn run() {
                 responder.respond(r);
             });
         })
-        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams, lab_ya_log, lab_ya_log_last, lab_ya_recent, lab_nav_log, ya_add, token_set, ya_login, engine_create, engine_drop, engine_open, engine_play, engine_pause, engine_seek, engine_volume, engine_rate, engine_state, engine_eq, engine_tap, engine_info, engine_stats, engine_devices, engine_set_device])
+        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams, lab_ya_log, lab_ya_log_last, lab_ya_recent, lab_nav_log, ya_add, token_set, ya_login, engine_create, engine_drop, engine_open, engine_play, engine_pause, engine_seek, engine_volume, engine_rate, engine_state, engine_eq, engine_tap, engine_info, engine_stats, engine_aether, engine_aether_state, engine_devices, engine_set_device])
         .run(tauri::generate_context!())
         .expect("не удалось запустить Пульс (Tauri)");
 }

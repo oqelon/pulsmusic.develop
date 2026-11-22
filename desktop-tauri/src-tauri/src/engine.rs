@@ -190,6 +190,9 @@ pub struct Shared {
     grave: Mutex<Vec<(Instant, Arc<Voice>)>>,
     /// журнал сбоев для отчёта
     log: Mutex<VecDeque<String>>,
+    /// ПУЛЬС AETHER SOUND: включён ли («ПОСЛЕ») и что он делает сейчас (для окна сравнения)
+    ae_on: AtomicBool,
+    ae_w: AtomicU32, ae_match: AtomicU32, ae_harsh: AtomicU32, ae_lim: AtomicU32,
 }
 impl Shared {
     fn new() -> Shared {
@@ -205,6 +208,8 @@ impl Shared {
             out_tx: Mutex::new(None),
             grave: Mutex::new(Vec::new()),
             log: Mutex::new(VecDeque::new()),
+            ae_on: AtomicBool::new(false),
+            ae_w: AtomicU32::new(0), ae_match: AtomicU32::new(0), ae_harsh: AtomicU32::new(0), ae_lim: AtomicU32::new(0),
         }
     }
     fn note(&self, m: String) {
@@ -334,6 +339,15 @@ impl Engine {
         if let Ok(t) = self.sh.out_tx.lock() { if let Some(t) = t.as_ref() { let _ = t.send(name); } }
     }
     pub fn device_now(&self) -> String { self.sh.device_now.lock().map(|d| d.clone()).unwrap_or_default() }
+    /// ПУЛЬС AETHER SOUND: «ПОСЛЕ» (true) или «ДО» (false). Переключение плавное, звук не прерывается.
+    pub fn set_aether(&self, on: bool) { self.sh.ae_on.store(on, Relaxed); }
+    /// Что делает обработка сейчас: доля «ПОСЛЕ» в смеси, выравнивание громкости, смягчение резкости,
+    /// самое сильное ослабление пиков с прошлого запроса (дБ).
+    pub fn aether_state(&self) -> serde_json::Value {
+        let lim = f32_get(&self.sh.ae_lim); f32_set(&self.sh.ae_lim, 0.0);
+        let r = |x: f32| (x * 100.0).round() / 100.0;
+        serde_json::json!({ "on": self.sh.ae_on.load(Relaxed), "mix": r(f32_get(&self.sh.ae_w)), "match_db": r(f32_get(&self.sh.ae_match)), "harsh_db": r(f32_get(&self.sh.ae_harsh)), "peak_db": r(lim), "rate": self.out_rate() })
+    }
     /// Сбои звука с запуска — для отчёта «Лаборатории».
     pub fn stats(&self) -> serde_json::Value {
         let g = |a: &AtomicU64| a.load(Relaxed);
@@ -691,9 +705,11 @@ const EQ_F: [f32; 10] = [31.0, 62.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0
 struct Master {
     ver: u64, rate: u32, p: EqParams, bq: [Bq; 10], st: [[BqS; 10]; 2], pre: f32, pre_t: f32, lim_g: f32,
     snap: Vec<Arc<Voice>>, snap_ver: u64, mix: Vec<f32>,
+    /// ПУЛЬС AETHER SOUND (aether.rs): создаётся вместе с выводом, под его частоту
+    ae: crate::aether::Aether,
 }
 impl Master {
-    fn new() -> Self { Master { ver: 0, rate: 0, p: EqParams::default(), bq: [Bq::default(); 10], st: [[BqS::default(); 10]; 2], pre: 1.0, pre_t: 1.0, lim_g: 1.0, snap: Vec::new(), snap_ver: 0, mix: Vec::new() } }
+    fn new(rate: u32) -> Self { Master { ver: 0, rate: 0, p: EqParams::default(), bq: [Bq::default(); 10], st: [[BqS::default(); 10]; 2], pre: 1.0, pre_t: 1.0, lim_g: 1.0, snap: Vec::new(), snap_ver: 0, mix: Vec::with_capacity(8192), ae: crate::aether::Aether::new(rate) } }
     fn refresh(&mut self, sh: &Shared, rate: u32) {
         if let Ok(e) = sh.eq.try_lock() {
             if e.ver != self.ver || rate != self.rate {
@@ -751,6 +767,15 @@ impl Master {
                 }
             } else if n > 0 { v.starved.store(false, Relaxed); }
         }
+        // ПУЛЬС AETHER SOUND: «ДО» — исходный звук, «ПОСЛЕ» — с обработкой; один источник, плавное смешение
+        if self.ae.rate() == rate {
+            self.ae.process(&mut self.mix[..frames * 2], sh.ae_on.load(Relaxed));
+            f32_set(&sh.ae_w, self.ae.w as f32);
+            f32_set(&sh.ae_match, self.ae.match_db() as f32);
+            f32_set(&sh.ae_harsh, self.ae.harsh_db() as f32);
+            let l = self.ae.take_lim_db() as f32;
+            if l < f32_get(&sh.ae_lim) { f32_set(&sh.ae_lim, l); }
+        }
         // общая шина: предусиление → эквалайзер → лимитер
         let eq = self.p.on && self.p.g.iter().any(|x| x.abs() > 0.01);
         let lim = self.p.lim && eq;
@@ -800,7 +825,7 @@ fn build_stream(sh: Arc<Shared>, name: &str) -> Result<(cpal::Stream, String), S
     macro_rules! mk {
         ($t:ty, $conv:expr) => {{
             let sh2 = sh.clone();
-            let mut m = Master::new();
+            let mut m = Master::new(rate);
             let mut last: Option<Instant> = None;
             dev.build_output_stream(&scfg, move |data: &mut [$t], _| {
                 let t0 = Instant::now();
@@ -1002,11 +1027,12 @@ mod tests {
         let t0 = Instant::now();
         while v.buf.len() < 48000 && t0.elapsed() < Duration::from_secs(5) { std::thread::sleep(Duration::from_millis(5)); }
         v.playing.store(true, Relaxed);
-        let mut m = Master::new();
+        let mut m = Master::new(48000);
         let (mut zero_run, mut worst, mut starts) = (0usize, 0usize, 0usize);
         let under0 = ST.underruns.load(Relaxed);
         let t0 = Instant::now();
-        for k in 0..280 { // ~3 с по 512 кадров, в темпе реального времени
+        for k in 0..280 { // ~3 с по 512 кадров, в темпе реального времени; AETHER «ДО»/«ПОСЛЕ» переключается каждые ~0,2 с
+            if k % 20 == 10 { sh.ae_on.store(!sh.ae_on.load(Relaxed), Relaxed); }
             m.render(&sh, 512, 48000);
             for i in 0..512 {
                 let x = m.mix[i * 2];
