@@ -52,6 +52,11 @@
     boots.push({ at: new Date().toISOString().slice(0, 19).replace('T', ' '), how: nv.type || '?', prevAgo: prev ? Math.round((Date.now() - prev.t) / 1000) : null, prevPage: prev ? prev.title || prev.page : null });
     localStorage.setItem('pulse.tauritest.boots', JSON.stringify(boots.slice(-20)));
   } catch (x) {}
+  // картинки, которые не загрузились (обложки): адрес без параметров — для отчёта (первые 30 за запуск)
+  (function () { var n = 0; document.addEventListener && document.addEventListener('error', function (e) {
+    var t = e && e.target; if (!t || t.tagName !== 'IMG' || n >= 30) return; n++;
+    enote('img', 'не загрузилась: ' + String(t.currentSrc || t.src || '').split('?')[0].slice(0, 160));
+  }, true); })();
   setInterval(function () { try { localStorage.setItem('pulse.tauritest.alive', JSON.stringify({ t: Date.now(), page: location.hash || location.pathname, nodes: document.body ? document.body.getElementsByTagName('*').length : 0, title: ((document.querySelector('.main .page h1') || {}).textContent || '').slice(0, 60) })); } catch (x) {} }, 1000);
 
   var T = window.__TAURI__;
