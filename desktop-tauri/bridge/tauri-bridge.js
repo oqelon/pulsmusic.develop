@@ -44,7 +44,15 @@
       HTMLMediaElement.prototype.play = function () { watch(this); mnote(this, 'play()'); return pl.apply(this, arguments); };
     } catch (x) { enote('media', 'журнал плеера не включился: ' + x); }
   })();
-  setInterval(function () { try { localStorage.setItem('pulse.tauritest.alive', JSON.stringify({ t: Date.now(), page: location.hash || location.pathname, nodes: document.body ? document.body.getElementsByTagName('*').length : 0 })); } catch (x) {} }, 1000);
+  // запуски окна: если интерфейс перезагрузился сам (а не программу открыли заново), здесь будет видно — как и с какой страницы
+  try {
+    var nv = (performance.getEntriesByType && performance.getEntriesByType('navigation')[0]) || {};
+    var prev = JSON.parse(localStorage.getItem('pulse.tauritest.alive') || 'null');
+    var boots = JSON.parse(localStorage.getItem('pulse.tauritest.boots') || '[]');
+    boots.push({ at: new Date().toISOString().slice(0, 19).replace('T', ' '), how: nv.type || '?', prevAgo: prev ? Math.round((Date.now() - prev.t) / 1000) : null, prevPage: prev ? prev.title || prev.page : null });
+    localStorage.setItem('pulse.tauritest.boots', JSON.stringify(boots.slice(-20)));
+  } catch (x) {}
+  setInterval(function () { try { localStorage.setItem('pulse.tauritest.alive', JSON.stringify({ t: Date.now(), page: location.hash || location.pathname, nodes: document.body ? document.body.getElementsByTagName('*').length : 0, title: ((document.querySelector('.main .page h1') || {}).textContent || '').slice(0, 60) })); } catch (x) {} }, 1000);
 
   var T = window.__TAURI__;
   if (!T || !T.core) { console.error('[pulse] нет связи с программой (__TAURI__)'); return; }

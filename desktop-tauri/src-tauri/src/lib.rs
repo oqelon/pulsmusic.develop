@@ -21,6 +21,7 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 
 use tauri::http::{header, Response, StatusCode};
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
@@ -234,12 +235,36 @@ async fn open_ui(app: tauri::AppHandle) -> Result<(), String> {
         .title("Пульс")
         .inner_size(1440.0, 900.0)
         .min_inner_size(1040.0, 680.0)
-        .initialization_script(format!("window.__PULSE_TOKEN__ = {tok}; window.__PULSE_TOKEN_INFO__ = {info};"));
+        .initialization_script(format!("window.__PULSE_TOKEN__ = {tok}; window.__PULSE_TOKEN_INFO__ = {info};"))
+        // как hardenWindow в Electron-версии (security.js): окно «Пульса» никуда не уходит со своей страницы —
+        // случайный переход (перетащенная картинка, ссылка) перезагрузил бы интерфейс. Ссылки наружу — в браузер.
+        .on_navigation({ let h = app.clone(); move |u| nav_guard(&h, u) });
     #[cfg(target_os = "macos")]
     let b = b.title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true);
     b.build().map_err(|e| e.to_string())?;
     Ok(())
 }
+
+const EXT_HOSTS: [&str; 6] = ["yandex.ru", "yandex.com", "github.com", "lrclib.net", "oqelon.github.io", "t.me"];
+static NAV_LOG: Mutex<Vec<String>> = Mutex::new(Vec::new());
+fn nav_guard(app: &tauri::AppHandle, u: &tauri::Url) -> bool {
+    let host = u.host_str().unwrap_or("");
+    let own = matches!(u.scheme(), "about" | "data" | "blob")
+        || (u.scheme() == "tauri" && host == "localhost")
+        || (matches!(u.scheme(), "http" | "https") && host == "tauri.localhost");
+    if own { return true; }
+    let ext = u.scheme() == "https" && EXT_HOSTS.iter().any(|h| host == *h || host.ends_with(&format!(".{h}")));
+    let short: String = u.as_str().chars().take(160).collect();
+    eprintln!("[pulse] переход окна остановлен: {short}{}", if ext { " (открыт в браузере)" } else { "" });
+    if let Ok(mut l) = NAV_LOG.lock() { l.push(format!("{} {short}{}", chrono_now(), if ext { " → в браузере" } else { "" })); let n = l.len(); if n > 40 { l.drain(..n - 40); } }
+    if ext { use tauri_plugin_opener::OpenerExt; let _ = app.opener().open_url(u.as_str(), None::<&str>); }
+    false
+}
+fn chrono_now() -> String {
+    let s = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    format!("{:02}:{:02}:{:02} UTC", (s / 3600) % 24, (s / 60) % 60, s % 60)
+}
+#[tauri::command] fn lab_nav_log() -> Vec<String> { NAV_LOG.lock().map(|l| l.clone()).unwrap_or_default() }
 
 // ——— PULSE Audio Engine: команды окна (см. engine.rs) ———
 fn eng() -> Result<&'static engine::Engine, String> { engine::get().ok_or_else(|| "движок не запущен".to_string()) }
@@ -291,7 +316,7 @@ pub fn run() {
                 responder.respond(r);
             });
         })
-        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams, lab_ya_log, lab_ya_log_last, lab_ya_recent, ya_add, token_set, ya_login, engine_create, engine_drop, engine_open, engine_play, engine_pause, engine_seek, engine_volume, engine_rate, engine_state, engine_eq, engine_tap, engine_info, engine_stats, engine_devices, engine_set_device])
+        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams, lab_ya_log, lab_ya_log_last, lab_ya_recent, lab_nav_log, ya_add, token_set, ya_login, engine_create, engine_drop, engine_open, engine_play, engine_pause, engine_seek, engine_volume, engine_rate, engine_state, engine_eq, engine_tap, engine_info, engine_stats, engine_devices, engine_set_device])
         .run(tauri::generate_context!())
         .expect("не удалось запустить Пульс (Tauri)");
 }

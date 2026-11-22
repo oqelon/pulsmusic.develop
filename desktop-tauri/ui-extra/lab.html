@@ -801,6 +801,10 @@
       L.push('Ошибки вывода: ' + E.stream_err + '; пересозданий вывода: ' + E.rebuilds + '; переполнений: ' + E.overflow);
       (E.log || []).forEach(function (x) { L.push('   ' + x); });
     }
+    var bt = []; try { bt = JSON.parse(localStorage.getItem('pulse.tauritest.boots') || '[]'); } catch (x) {}
+    L.push(''); L.push('— ЗАПУСКИ ОКНА «ПУЛЬСА» (' + bt.length + '; «reload» = интерфейс перезагрузился сам)');
+    bt.forEach(function (b) { L.push('   ' + b.at + ' UTC: ' + b.how + (b.prevAgo != null ? ', до этого окно отвечало ' + b.prevAgo + ' с назад на странице «' + (b.prevPage || '?') + '»' : '')); });
+    L.push('Остановленные переходы окна: ' + (R.navs && R.navs.length ? '' : 'не было')); (R.navs || []).forEach(function (x) { L.push('   ' + x); });
     var el = errLog(); L.push(''); L.push('— ЭТАП 4: ОКНО «ПУЛЬСА»: ' + aliveLine()); L.push('Ошибки окна (' + el.length + '):'); el.forEach(function (x) { L.push('   ' + x.at + ' [' + x.k + '] ' + x.page + ' — ' + x.m); });
     L.push(''); L.push('— ОПЫТ: СКОЛЬКО ЗВУЧИТ СТАРОЕ МЕСТО ПОСЛЕ ПЕРЕМОТКИ' + (R.lag.length ? '' : ': не проверяли'));
     R.lag.forEach(function (x) { L.push(x.name + ': ' + (x.err ? 'ошибка ' + x.err : x.lags.map(function (v) { return v == null ? '>3000' : v; }).join(', ') + ' мс, в среднем ' + x.avg + ' мс') + '; задержка цепочки ' + x.base + ' / ' + x.out); });
@@ -826,7 +830,10 @@
     L.push(''); L.push('— ЖУРНАЛ'); L.push(R.logs.join('\n'));
     return L.join('\n');
   }
-  async function engineStats() { try { R.engine = await invoke('engine_stats'); R.engineErr = null; } catch (e) { R.engine = null; R.engineErr = String(e); } }
+  async function engineStats() {
+    try { R.engine = await invoke('engine_stats'); R.engineErr = null; } catch (e) { R.engine = null; R.engineErr = String(e); }
+    try { R.navs = await invoke('lab_nav_log'); } catch (e) { R.navs = ['журнал недоступен: ' + e]; }
+  }
   $('mkRep').onclick = async function () { await seekTimeline(); await engineStats(); $('rep').value = report(); $('repSt').textContent = 'Готово'; };
   $('copyRep').onclick = async function () {
     if (!$('rep').value) { await engineStats(); $('rep').value = report(); }
