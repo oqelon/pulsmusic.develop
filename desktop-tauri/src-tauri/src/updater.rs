@@ -32,6 +32,8 @@ const REPO: &str = "oqelon/pulsmusic.develop";
 const FEED: &str = "https://github.com/oqelon/pulsmusic.develop/releases/latest/download/latest.json";
 const API_LATEST: &str = "https://api.github.com/repos/oqelon/pulsmusic.develop/releases/latest";
 const PKG_PREFIX: &str = "https://github.com/oqelon/pulsmusic.develop/releases/download/";
+/// тестовая лента может лежать и в самом репозитории (папка updates/tauri-test ветки tauri-migration)
+const TEST_RAW: &str = "https://raw.githubusercontent.com/oqelon/pulsmusic.develop/";
 
 /// номер тестовой сборки (CI задаёт PULSE_BUILD); у местной сборки — 0
 pub fn build_no() -> u64 { option_env!("PULSE_BUILD").and_then(|s| s.parse().ok()).unwrap_or(0) }
@@ -350,7 +352,7 @@ pub fn on_exit() {
 /// тестовый канал: адрес тестовой ленты (None — обычный канал)
 pub fn set_test_feed(url: Option<String>) -> Result<(), String> {
     if !test_allowed() { return Err("тестовый канал есть только в тестовых сборках".into()); }
-    if let Some(u) = &url { if !u.starts_with(PKG_PREFIX) { return Err("тестовая лента — только из релизов «Пульса» на GitHub".into()); } }
+    if let Some(u) = &url { if !u.starts_with(PKG_PREFIX) && !u.starts_with(TEST_RAW) { return Err("тестовая лента — только из репозитория «Пульса» на GitHub".into()); } }
     let mut g = st();
     g.test_feed = url;
     g.latest = None;
