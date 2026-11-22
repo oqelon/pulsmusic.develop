@@ -65,6 +65,14 @@
 </section>
 
 <section>
+  <h2>Диагностика: запуск Lossless и перемотка Opus</h2>
+  <p class="sub">В прошлом отчёте «Яндекс FLAC 24/96» в лаборатории не успел заиграть за 1,6 с (в интерфейсе — играл). Здесь — замер: сколько ждём до звука, были ли остановки на подгрузку, какие куски просил плеер. Варианты: описание звука (moov) в конце и в начале файла, куски по 256 КБ и по 2 МБ (как будет с настоящим Яндексом). Плюс длинный Opus (3 мин) — перемотка к 10/50/90/97%. Займёт около минуты.</p>
+  <div class="row"><button class="acc" id="runDiag">Замерить</button><span id="diagSt" class="mute"></span></div>
+  <table id="dtbl"><thead><tr><th>Вариант</th><th>До звука</th><th>Сыграно за 4 с</th><th>Остановок</th><th>Перемотка 50%</th><th>Запросов</th><th>Самый долгий</th></tr></thead><tbody></tbody></table>
+  <div class="log" id="diagLog"></div>
+</section>
+
+<section>
   <h2>1. Форматы</h2>
   <p class="sub">15 файлов по 10 секунд. Каждый тихо проиграется около 4 секунд с перемоткой — наденьте наушники или убавьте громкость. Займёт около двух минут.</p>
   <div class="row"><button class="acc" id="runAll">Проверить все форматы</button><span id="runSt" class="mute"></span></div>
@@ -128,7 +136,7 @@
   var $ = function (id) { return document.getElementById(id); };
   var sleep = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
   var started = new Date();
-  var R = { env: null, sys: {}, rust: [], formats: [], user: [], eq: null, vol: null, xf: null, sink: null, bg: null, keys: [], manual: {}, logs: [] };
+  var R = { env: null, sys: {}, diag: [], opusLong: null, rust: [], formats: [], user: [], eq: null, vol: null, xf: null, sink: null, bg: null, keys: [], manual: {}, logs: [] };
 
   var FILES = [
     ['flac-16-44.flac', 'audio/flac', 'FLAC 16/44,1'],
@@ -299,7 +307,7 @@
     var btn = this; btn.disabled = true; getCtx(); R.rust = [];
     var tb = document.querySelector('#rtbl tbody'); tb.innerHTML = '';
     var list = [];
-    try { (await invoke('lab_streams')).forEach(function (s) { list.push({ name: s.name, url: YA + s.id, mime: CODEC_MIME[s.id === 'lab-aac' ? 'aac-mp4' : s.id === 'lab-mp3' ? 'mp3' : 'flac-mp4'], plain: s.plain, ya: true }); }); }
+    try { (await invoke('lab_streams')).filter(function (s) { return !s.diag; }).forEach(function (s) { list.push({ name: s.name, url: YA + s.id, mime: CODEC_MIME[s.id === 'lab-aac' ? 'aac-mp4' : s.id === 'lab-mp3' ? 'mp3' : 'flac-mp4'], plain: s.plain, ya: true }); }); }
     catch (e) { $('rustSt').textContent = 'Нет связи с программой: ' + e; btn.disabled = false; return; }
     list.push({ name: 'Свой файл FLAC 24/96 (pulsefile://)', url: PF + 'a/lab-flac', mime: 'audio/flac', plain: 'flac-24-96.flac' });
     list.push({ name: 'Образ аудио-CD → WAV (pulsefile://)', url: PF + 'a/lab-cd', mime: 'audio/wav', plain: null });
@@ -321,6 +329,66 @@
     var tr2 = document.createElement('tr'); tr2.innerHTML = '<td>Обложка своего файла (pulsefile://c/)</td><td colspan="9">' + mark(cov.ok, cov.w ? cov.w + ' px' : (cov.err || 'не загрузилась')) + '</td>'; tb.appendChild(tr2);
     var good = R.rust.filter(function (r) { return r.play && r.play.ok && (!r.bytes || r.bytes.ok); }).length;
     $('rustSt').textContent = 'Готово: ' + good + ' из ' + R.rust.length + ' играют и совпадают байт в байт. Наведите на значок — будет подробность.';
+    btn.disabled = false;
+  };
+
+  // ——— диагностика запуска
+  async function startProbe(url) {
+    var c = getCtx(), a = new Audio(); a.crossOrigin = 'anonymous'; a.preload = 'auto';
+    var src = c.createMediaElementSource(a), an = c.createAnalyser(), g = c.createGain(); g.gain.value = 0.2; an.fftSize = 2048;
+    src.connect(an); an.connect(g); g.connect(c.destination);
+    var r = { waits: 0, startMs: null };
+    var t0 = performance.now();
+    a.addEventListener('waiting', function () { r.waits++; });
+    a.addEventListener('playing', function () { if (r.startMs == null) r.startMs = Math.round(performance.now() - t0); }, { once: true });
+    a.src = url;
+    try { await a.play(); } catch (e) { r.err = (e.name || '') + ' ' + e.message; }
+    await sleep(4000);
+    r.after4 = +a.currentTime.toFixed(2);
+    var m = await measure(an, 300); r.rms = +m.max.toFixed(4);
+    try {
+      var want = (a.duration || 10) * 0.5, ts = performance.now(); a.currentTime = want;
+      await new Promise(function (res) { var f = function () { if (a.currentTime > want + 0.3) { a.removeEventListener('timeupdate', f); res(); } }; a.addEventListener('timeupdate', f); setTimeout(res, 5000); });
+      r.seekMs = a.currentTime > want + 0.3 ? Math.round(performance.now() - ts) : null;
+    } catch (e) { r.seekMs = null; }
+    a.pause(); try { src.disconnect(); an.disconnect(); g.disconnect(); } catch (e) {}
+    a.removeAttribute('src'); a.load();
+    return r;
+  }
+  $('runDiag').onclick = async function () {
+    var btn = this; btn.disabled = true; getCtx(); stopAll(); R.diag = [];
+    var tb = document.querySelector('#dtbl tbody'); tb.innerHTML = ''; $('diagLog').textContent = '';
+    var list = [];
+    try { list = (await invoke('lab_streams')).filter(function (s) { return s.diag; }); } catch (e) { $('diagSt').textContent = 'Нет связи с программой: ' + e; btn.disabled = false; return; }
+    list.unshift({ id: null, name: 'Для сравнения: тот же 24/96 напрямую (pulsetest://, целиком)', url: BASE + '/test/ya-flac-mp4-24-96.plain.m4a' });
+    for (var i = 0; i < list.length; i++) {
+      var s = list[i]; $('diagSt').textContent = (i + 1) + ' из ' + (list.length + 1) + ': ' + s.name;
+      var tr = document.createElement('tr'); tr.innerHTML = '<td>' + s.name + '</td><td colspan="6" class="mute">замеряю…</td>'; tb.appendChild(tr);
+      var r = await startProbe(s.id ? YA + s.id : s.url); r.name = s.name;
+      var L = s.id ? await invoke('lab_ya_log', { id: s.id }).catch(function () { return []; }) : [];
+      r.reqs = L.length; r.maxMs = L.reduce(function (m, x) { return Math.max(m, x.ms); }, 0); r.log = L;
+      R.diag.push(r);
+      var good = r.startMs != null && r.startMs < 800 && r.after4 > 2.8;
+      tr.innerHTML = '<td>' + s.name + '</td><td class="c ' + (r.startMs == null ? 'bad' : r.startMs < 800 ? 'ok' : 'warn') + '">' + (r.startMs == null ? 'не заиграл' : r.startMs + ' мс') + '</td>' +
+        '<td class="c ' + (r.after4 > 2.8 ? 'ok' : 'bad') + '">' + r.after4 + ' с</td><td class="c">' + r.waits + '</td>' +
+        '<td class="c">' + (r.seekMs == null ? '<span class="bad">нет</span>' : r.seekMs + ' мс') + '</td><td class="c">' + (s.id ? r.reqs : '—') + '</td><td class="c">' + (s.id ? r.maxMs + ' мс' : '—') + '</td>';
+      L.forEach(function (x) { log('diagLog', s.id + ': +' + x.at_ms + ' мс просил «' + x.asked + '» → ' + x.status + ' ' + (x.served || '') + ', ' + x.bytes + ' байт за ' + x.ms + ' мс'); });
+    }
+    // длинный Opus: перемотка к 10/50/90/97%
+    $('diagSt').textContent = 'Длинный Opus: перемотка…';
+    var o = { seeks: [] }, a = new Audio(PF + 'a/lab-opus-long'); a.volume = 0.2; playing.push(a);
+    try {
+      await a.play(); await sleep(800);
+      for (var k of [0.1, 0.5, 0.9, 0.97]) {
+        var want = a.duration * k; a.currentTime = want; await sleep(1800);
+        o.seeks.push({ k: k, want: +want.toFixed(1), at: +a.currentTime.toFixed(1), ok: a.currentTime > want + 0.8 && !a.paused, paused: a.paused, ended: a.ended });
+      }
+    } catch (e) { o.err = e.message; }
+    a.pause(); R.opusLong = o;
+    var tr2 = document.createElement('tr');
+    tr2.innerHTML = '<td>Opus 3 мин (свой файл): перемотка 10 / 50 / 90 / 97%</td><td colspan="6">' + (o.err ? '<span class="bad">' + o.err + '</span>' : o.seeks.map(function (x) { return mark(x.ok, 'хотели ' + x.want + ' с, стало ' + x.at + ' с' + (x.paused ? ', на паузе' : '') + (x.ended ? ', закончился' : '')); }).join(' ')) + '</td>';
+    tb.appendChild(tr2);
+    $('diagSt').textContent = 'Готово. Наведите на значок — будет подробность.';
     btn.disabled = false;
   };
 
@@ -564,6 +632,12 @@
           '; раскодирует: ' + (r.decode ? (r.decode.ok ? 'да, ' + r.decode.sr + ' Гц' : 'НЕТ ' + (r.decode.err || '')) : '—'),
       ].join('\n');
     };
+    L.push(''); L.push('— ДИАГНОСТИКА ЗАПУСКА' + (R.diag.length ? '' : ': не проверяли'));
+    R.diag.forEach(function (r) {
+      L.push(r.name + ': до звука ' + (r.startMs == null ? 'НЕ заиграл' : r.startMs + ' мс') + '; за 4 с сыграно ' + r.after4 + ' с; остановок ' + r.waits + '; перемотка 50% ' + (r.seekMs == null ? 'НЕТ' : r.seekMs + ' мс') + '; RMS ' + r.rms + (r.err ? '; ошибка ' + r.err : '') + (r.reqs ? '; запросов ' + r.reqs + ', самый долгий ' + r.maxMs + ' мс' : ''));
+      (r.log || []).forEach(function (x) { L.push('   +' + x.at_ms + ' мс «' + x.asked + '» → ' + x.status + ' ' + (x.served || '') + ' ' + x.bytes + ' Б, ' + x.ms + ' мс'); });
+    });
+    if (R.opusLong) L.push('Opus 3 мин, перемотка: ' + (R.opusLong.err ? 'ошибка ' + R.opusLong.err : R.opusLong.seeks.map(function (x) { return Math.round(x.k * 100) + '% ' + (x.ok ? 'да' : 'НЕТ (стало ' + x.at + ' с' + (x.paused ? ', пауза' : '') + (x.ended ? ', конец' : '') + ')'); }).join(', ')));
     L.push(''); L.push('— ЭТАП 3: ЗВУК ЧЕРЕЗ RUST' + (R.rust.length ? '' : ': не проверяли'));
     R.rust.forEach(function (r) { L.push(fmt(r) + '\n   байт в байт: ' + (r.bytes ? (r.bytes.ok ? 'да (' + r.bytes.bytes + ' байт)' : 'НЕТ ' + r.bytes.err) : '—') + (r.fmt !== undefined ? '; формат: ' + (r.fmt ? r.fmt.codec + ' ' + r.fmt.bits + ' бит ' + r.fmt.sr + ' Гц' : 'НЕ узнал') : '')); });
     if (R.rustCover) L.push('Обложка своего файла: ' + yn(R.rustCover.ok));

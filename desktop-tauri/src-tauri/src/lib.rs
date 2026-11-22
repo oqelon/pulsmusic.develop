@@ -108,8 +108,12 @@ fn ya_fmt(url: String) -> Option<yastream::Fmt> { yastream::fmt_of(&url) }
 // тестовые потоки «Яндекса» для лаборатории
 #[tauri::command]
 fn lab_streams() -> Vec<serde_json::Value> {
-    lab::STREAMS.iter().map(|s| serde_json::json!({ "id": s.id, "name": s.name, "url": format!("pulseya://s/{}", s.id), "plain": s.plain, "encrypted": s.key.is_some() })).collect()
+    lab::STREAMS.iter().map(|s| serde_json::json!({ "id": s.id, "name": s.name, "url": format!("pulseya://s/{}", s.id), "plain": s.plain, "encrypted": s.key.is_some(), "chunk": s.chunk, "diag": s.diag })).collect()
 }
+
+// журнал запросов плеера к pulseya:// (диагностика)
+#[tauri::command]
+fn lab_ya_log(id: String) -> Vec<yastream::LogRow> { yastream::log_of(&id) }
 
 #[tauri::command]
 async fn open_ui(app: tauri::AppHandle) -> Result<(), String> {
@@ -154,7 +158,7 @@ pub fn run() {
                 responder.respond(r);
             });
         })
-        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams])
+        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams, lab_ya_log])
         .run(tauri::generate_context!())
         .expect("не удалось запустить Пульс (Tauri)");
 }

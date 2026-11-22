@@ -198,7 +198,35 @@ fn content_range(v: &str) -> Option<(u64, String)> {
     Some((a.trim().parse().ok()?, total.trim().to_string()))
 }
 
+/// Журнал запросов плеера (для диагностики в лаборатории): что просил, что отдали, сколько заняло.
+#[derive(Clone, Serialize)]
+pub struct LogRow { pub id: String, pub at_ms: u64, pub asked: String, pub status: u16, pub served: String, pub bytes: usize, pub ms: u64 }
+fn log() -> &'static Mutex<std::collections::VecDeque<LogRow>> {
+    static L: OnceLock<Mutex<std::collections::VecDeque<LogRow>>> = OnceLock::new();
+    L.get_or_init(|| Mutex::new(std::collections::VecDeque::new()))
+}
+fn t0() -> Instant { static T: OnceLock<Instant> = OnceLock::new(); *T.get_or_init(Instant::now) }
+pub fn log_of(id: &str) -> Vec<LogRow> { log().lock().map(|l| l.iter().filter(|r| r.id == id).cloned().collect()).unwrap_or_default() }
+
 pub async fn serve(id: &str, range: Option<String>) -> Response<Vec<u8>> {
+    let start = Instant::now();
+    let r = serve_inner(id, range.clone()).await;
+    if let Ok(mut l) = log().lock() {
+        if l.len() >= 600 { l.pop_front(); }
+        l.push_back(LogRow {
+            id: id.to_string(),
+            at_ms: start.duration_since(t0()).as_millis() as u64,
+            asked: range.unwrap_or_else(|| "—".into()),
+            status: r.status().as_u16(),
+            served: r.headers().get(header::CONTENT_RANGE).and_then(|v| v.to_str().ok()).unwrap_or("").to_string(),
+            bytes: r.body().len(),
+            ms: start.elapsed().as_millis() as u64,
+        });
+    }
+    r
+}
+
+async fn serve_inner(id: &str, range: Option<String>) -> Response<Vec<u8>> {
     let (urls, key, mime, chunk) = {
         let Ok(r) = reg().lock() else { return resp::plain(StatusCode::INTERNAL_SERVER_ERROR, "реестр") };
         match r.get(id) {

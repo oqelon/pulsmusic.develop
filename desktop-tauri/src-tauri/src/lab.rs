@@ -75,15 +75,20 @@ pub fn start_server_at(dir: PathBuf) -> u16 {
     port
 }
 
-pub struct LabStream { pub id: &'static str, pub name: &'static str, pub file: &'static str, pub key: Option<&'static str>, pub codec: &'static str, pub plain: &'static str, pub bad_first: bool }
+pub struct LabStream { pub id: &'static str, pub name: &'static str, pub file: &'static str, pub key: Option<&'static str>, pub codec: &'static str, pub plain: &'static str, pub bad_first: bool, pub chunk: u64, pub diag: bool }
 
 /// Тестовые «потоки Яндекса»: как приходят от get-file-info (зашифрованный FLAC в MP4) и обычные AAC/MP3.
 pub const STREAMS: &[LabStream] = &[
-    LabStream { id: "lab-flac16", name: "Яндекс FLAC 16/44 (зашифрован, AES-128)", file: "ya-flac-mp4-16-44.enc", key: Some("00112233445566778899aabbccddeeff"), codec: "flac-mp4", plain: "flac-in-mp4.m4a", bad_first: false },
-    LabStream { id: "lab-flac24", name: "Яндекс FLAC 24/96 (зашифрован, AES-256)", file: "ya-flac-mp4-24-96.enc", key: Some("0f1e2d3c4b5a69788796a5b4c3d2e1f00102030405060708090a0b0c0d0e0f10"), codec: "flac-mp4", plain: "ya-flac-mp4-24-96.plain.m4a", bad_first: false },
-    LabStream { id: "lab-aac", name: "Яндекс AAC 256 (без шифрования)", file: "aac-256.m4a", key: None, codec: "aac-mp4", plain: "aac-256.m4a", bad_first: false },
-    LabStream { id: "lab-mp3", name: "Яндекс MP3 320 (без шифрования)", file: "mp3-320.mp3", key: None, codec: "mp3", plain: "mp3-320.mp3", bad_first: false },
-    LabStream { id: "lab-retry", name: "Первая ссылка не работает → запасная", file: "ya-flac-mp4-16-44.enc", key: Some("00112233445566778899aabbccddeeff"), codec: "flac-mp4", plain: "flac-in-mp4.m4a", bad_first: true },
+    LabStream { id: "lab-flac16", name: "Яндекс FLAC 16/44 (зашифрован, AES-128)", file: "ya-flac-mp4-16-44.enc", key: Some("00112233445566778899aabbccddeeff"), codec: "flac-mp4", plain: "flac-in-mp4.m4a", bad_first: false, chunk: 256 * 1024, diag: false },
+    LabStream { id: "lab-flac24", name: "Яндекс FLAC 24/96 (зашифрован, AES-256)", file: "ya-flac-mp4-24-96.enc", key: Some("0f1e2d3c4b5a69788796a5b4c3d2e1f00102030405060708090a0b0c0d0e0f10"), codec: "flac-mp4", plain: "ya-flac-mp4-24-96.plain.m4a", bad_first: false, chunk: 256 * 1024, diag: false },
+    LabStream { id: "lab-aac", name: "Яндекс AAC 256 (без шифрования)", file: "aac-256.m4a", key: None, codec: "aac-mp4", plain: "aac-256.m4a", bad_first: false, chunk: 256 * 1024, diag: false },
+    LabStream { id: "lab-mp3", name: "Яндекс MP3 320 (без шифрования)", file: "mp3-320.mp3", key: None, codec: "mp3", plain: "mp3-320.mp3", bad_first: false, chunk: 256 * 1024, diag: false },
+    LabStream { id: "lab-retry", name: "Первая ссылка не работает → запасная", file: "ya-flac-mp4-16-44.enc", key: Some("00112233445566778899aabbccddeeff"), codec: "flac-mp4", plain: "flac-in-mp4.m4a", bad_first: true, chunk: 256 * 1024, diag: false },
+    // диагностика запуска (этап 3, отчёт 22.11): MP4 с описанием в конце и в начале, куски 256 КБ и 2 МБ (как с настоящим Яндексом)
+    LabStream { id: "diag-end-256", name: "24/96, описание в конце, куски 256 КБ", file: "ya-flac-mp4-24-96.enc", key: Some("0f1e2d3c4b5a69788796a5b4c3d2e1f00102030405060708090a0b0c0d0e0f10"), codec: "flac-mp4", plain: "ya-flac-mp4-24-96.plain.m4a", bad_first: false, chunk: 256 * 1024, diag: true },
+    LabStream { id: "diag-end-2m", name: "24/96, описание в конце, куски 2 МБ", file: "ya-flac-mp4-24-96.enc", key: Some("0f1e2d3c4b5a69788796a5b4c3d2e1f00102030405060708090a0b0c0d0e0f10"), codec: "flac-mp4", plain: "ya-flac-mp4-24-96.plain.m4a", bad_first: false, chunk: 2 * 1024 * 1024, diag: true },
+    LabStream { id: "diag-fast-256", name: "24/96, описание в начале, куски 256 КБ", file: "ya-flac-mp4-24-96-fast.enc", key: Some("0f1e2d3c4b5a69788796a5b4c3d2e1f00102030405060708090a0b0c0d0e0f10"), codec: "flac-mp4", plain: "ya-flac-mp4-24-96-fast.plain.m4a", bad_first: false, chunk: 256 * 1024, diag: true },
+    LabStream { id: "diag-fast-2m", name: "24/96, описание в начале, куски 2 МБ", file: "ya-flac-mp4-24-96-fast.enc", key: Some("0f1e2d3c4b5a69788796a5b4c3d2e1f00102030405060708090a0b0c0d0e0f10"), codec: "flac-mp4", plain: "ya-flac-mp4-24-96-fast.plain.m4a", bad_first: false, chunk: 2 * 1024 * 1024, diag: true },
 ];
 
 /// При запуске: сервер + регистрация тестовых потоков и своих файлов (постоянные адреса — их знает демо-интерфейс).
@@ -93,8 +98,8 @@ pub fn setup(media: PathBuf) {
         let mut urls = Vec::new();
         if s.bad_first { urls.push(format!("http://127.0.0.1:{port}/missing-{}", s.file)); }
         urls.push(format!("http://127.0.0.1:{port}/{}", s.file));
-        // кусками по 256 КБ, а не по 2 МБ: тестовые файлы маленькие, а проверить нужно много кусков и перемотку
-        let _ = crate::yastream::add_as(s.id.into(), urls, s.key.map(|k| k.to_string()), Some(s.codec.into()), 256 * 1024);
+        // обычные тестовые — кусками по 256 КБ (файлы маленькие, а проверить нужно много кусков и перемотку)
+        let _ = crate::yastream::add_as(s.id.into(), urls, s.key.map(|k| k.to_string()), Some(s.codec.into()), s.chunk);
     }
     use crate::localfile::{register, register_cover, Src};
     let raw = media.join("cd-raw.bin");
@@ -103,5 +108,6 @@ pub fn setup(media: PathBuf) {
     register("lab-aiff", Src::File(media.join("aiff-16-44.aif")));
     register("lab-flac", Src::File(media.join("flac-24-96.flac")));
     register("lab-webm", Src::File(media.join("webm-opus.webm")));
+    register("lab-opus-long", Src::File(media.join("opus-long.opus")));
     register_cover("lab-cover", media.join("cover.jpg"));
 }
