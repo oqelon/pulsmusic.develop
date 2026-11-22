@@ -62,6 +62,12 @@ jobs:
           codesign --verify --deep "$APP" && echo "codesign --verify --deep: ок"
           du -sh "$APP" out/*
           echo "app_mb=$(du -sm "$APP" | cut -f1)" >> "$GITHUB_OUTPUT"
+      # сборка доступна и без релиза: страница запуска в GitHub → «Artifacts» (нужен вход в GitHub)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pulse-tauri-test-${{ github.run_number }}
+          path: out/*
+          retention-days: 14
       - name: Предварительный релиз
         env:
           GH_TOKEN: ${{ github.token }}
