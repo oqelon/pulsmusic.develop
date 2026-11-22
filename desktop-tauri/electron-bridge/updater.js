@@ -377,7 +377,7 @@ function prepare(progress) {
 //   • Windows — установщик ставится тихо, новый «Пульс» открывается, прежний (папка, ярлыки, запись в «Установке и
 //     удалении программ») удаляется. Не вышло — прежний «Пульс» остаётся и пробует снова при следующем запуске.
 // Данные (лайки, плейлисты, история, вход, ключи друзей) новая версия забирает сама при первом запуске.
-const MOVE_V = '0.40.0';
+const MOVE_V = '0.41.0';
 const MOVE_URL = { darwin: RAW + MOVE_V + '/mac.json', win32: RAW + MOVE_V + '/win.json' };
 const winMsg = (v, arch, a) => ['PULSE-WIN-V1', v, arch, String(a.sha256 || '').toLowerCase(), String(Number(a.size) || 0)].join('\n');
 function winGood(v, arch, a) {
