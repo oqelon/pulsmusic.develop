@@ -211,7 +211,6 @@ fn log() -> &'static Mutex<std::collections::VecDeque<LogRow>> {
     static L: OnceLock<Mutex<std::collections::VecDeque<LogRow>>> = OnceLock::new();
     L.get_or_init(|| Mutex::new(std::collections::VecDeque::new()))
 }
-fn t0() -> Instant { static T: OnceLock<Instant> = OnceLock::new(); *T.get_or_init(Instant::now) }
 pub fn log_last(n: usize) -> Vec<LogRow> { log().lock().map(|l| l.iter().rev().take(n).rev().cloned().collect()).unwrap_or_default() }
 pub fn log_of(id: &str) -> Vec<LogRow> { log().lock().map(|l| l.iter().filter(|r| r.id == id).cloned().collect()).unwrap_or_default() }
 

@@ -356,6 +356,8 @@ struct Track {
     skip_until: Option<f64>,
     rs: Option<(SincFixedIn<f32>, u32, u32, f32)>, // ресемплер, вход, выход, скорость
     pend: [Vec<f32>; 2],                            // вход ресемплера, ещё не набравший кусок
+    good: u64,
+    bad: u64,
 }
 
 fn open_track(url: &str) -> Result<(Track, f64), (String, String)> {
@@ -376,7 +378,7 @@ fn open_track(url: &str) -> Result<(Track, f64), (String, String)> {
         (Some(n), None) => n as f64 / sr as f64,
         _ => f64::NAN,
     };
-    Ok((Track { format, dec, track_id, sr, tb: p.time_base, skip_until: None, rs: None, pend: [Vec::new(), Vec::new()] }, dur))
+    Ok((Track { format, dec, track_id, sr, tb: p.time_base, skip_until: None, rs: None, pend: [Vec::new(), Vec::new()], good: 0, bad: 0 }, dur))
 }
 
 fn sinc() -> SincInterpolationParameters {
@@ -509,9 +511,16 @@ fn decoder_thread(v: Arc<Voice>, sh: Arc<Shared>, rx: Receiver<Cmd>) {
         let pkt_t = match tr.tb { Some(tb) => { let t = tb.calc_time(pkt.ts()); t.seconds as f64 + t.frac } None => pkt.ts() as f64 / tr.sr as f64 };
         let decoded = match tr.dec.decode(&pkt) {
             Ok(b) => b,
-            Err(SymErr::DecodeError(e)) => { dbg(1, 1); if DBG[1].load(Ordering::Relaxed) < 5 { eprintln!("[engine] декодер: {e}"); } continue; }
+            Err(SymErr::DecodeError(e)) => {
+                dbg(1, 1); tr.bad += 1;
+                if tr.bad <= 3 { eprintln!("[engine] декодер: {e}"); }
+                // поток не декодируется совсем (например, FLAC 32 бит) — пусть играет окно (<audio>)
+                if tr.bad >= 24 && tr.good == 0 { set_err(&v, "unsupported", format!("декодер: {e}")); }
+                continue;
+            }
             Err(e) => { set_err(&v, "decode", e.to_string()); continue; }
         };
+        tr.good += 1;
         let spec = *decoded.spec();
         let ch = spec.channels.count().max(1);
         if spec.rate != 0 && spec.rate != tr.sr { tr.sr = spec.rate; }
@@ -728,7 +737,7 @@ fn event_thread(sh: Arc<Shared>, app: tauri::AppHandle) {
         for v in list {
             let t = v.position(rate);
             let d = f64_get(&v.dur);
-            let mut send = |k: &'static str, e: Option<String>| { let _ = app.emit("pulse-engine", Ev { v: v.id, k, t, d, e }); };
+            let send = |k: &'static str, e: Option<String>| { let _ = app.emit("pulse-engine", Ev { v: v.id, k, t, d, e }); };
             if v.loaded.load(Ordering::Relaxed) && !v.ev_loaded.swap(true, Ordering::Relaxed) { send("loaded", None); }
             if let Some((k, m)) = v.error.lock().ok().and_then(|e| e.clone()) { if !v.ev_err.swap(true, Ordering::Relaxed) { send("error", Some(format!("{k}|{m}"))); } }
             if v.ended.load(Ordering::Relaxed) && !v.ev_ended.swap(true, Ordering::Relaxed) { send("ended", None); }
