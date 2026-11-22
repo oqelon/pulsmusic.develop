@@ -37,7 +37,10 @@ use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
 
 // токен Яндекса — в Связке ключей macOS (Windows: диспетчер учётных данных), отдельно от Electron-версии
-const KEY_SERVICE: &str = "ru.pulse.desktop.tauritest";
+/// выпускная сборка (при сборке задан PULSE_RELEASE): без «Лаборатории», тестовых файлов и тестового канала
+/// обновлений; окно «Пульса» открывается сразу. Тестовые сборки — как раньше.
+pub const RELEASE: bool = option_env!("PULSE_RELEASE").is_some();
+const KEY_SERVICE: &str = if RELEASE { "ru.pulse.desktop" } else { "ru.pulse.desktop.tauritest" };
 const KEY_USER: &str = "yandex-token";
 const CHUNK: u64 = 4 * 1024 * 1024;
 const AUDIO_EXT: &[&str] = &["flac", "mp3", "m4a", "m4b", "aac", "mp4", "ogg", "oga", "opus", "webm", "weba", "wav", "aif", "aiff", "alac", "caf", "wv", "ape", "dsf", "dff"];
@@ -53,6 +56,7 @@ fn lab_media(app: &tauri::AppHandle) -> Option<PathBuf> { app.path().resource_di
 
 // pulsetest://localhost/test/<имя> — тестовые файлы «Лаборатории» (этап 2)
 fn serve_test(app: &tauri::AppHandle, path: &str, range: Option<String>) -> Response<Vec<u8>> {
+    if RELEASE { return resp::plain(StatusCode::NOT_FOUND, "нет"); }
     let n = path.trim_start_matches('/').strip_prefix("test/").unwrap_or("");
     if !safe_name(n) { return resp::plain(StatusCode::NOT_FOUND, "нет такого файла"); }
     let Some(fp) = lab_media(app).map(|d| d.join(n)) else { return resp::plain(StatusCode::NOT_FOUND, "нет папки") };
@@ -243,9 +247,11 @@ async fn open_ui(app: tauri::AppHandle) -> Result<(), String> {
     let (t, info) = token_get(&app);
     let tok = serde_json::to_string(&t).unwrap_or_else(|_| "\"\"".into());
     let info = serde_json::to_string(&info).unwrap_or_else(|_| "\"\"".into());
+    let (x, y, w, h, max) = win_bounds(&app);
     let b = WebviewWindowBuilder::new(&app, "main", WebviewUrl::App("index.html".into()))
         .title("Пульс")
-        .inner_size(1440.0, 900.0)
+        .inner_size(w, h)
+        .position(x, y)
         .min_inner_size(1040.0, 680.0)
         .initialization_script(format!("window.__PULSE_TOKEN__ = {tok}; window.__PULSE_TOKEN_INFO__ = {info}; {mig}"))
         // как hardenWindow в Electron-версии (security.js): окно «Пульса» никуда не уходит со своей страницы —
@@ -253,8 +259,50 @@ async fn open_ui(app: tauri::AppHandle) -> Result<(), String> {
         .on_navigation({ let h = app.clone(); move |u| nav_guard(&h, u) });
     #[cfg(target_os = "macos")]
     let b = b.title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true);
-    b.build().map_err(|e| e.to_string())?;
+    let win = b.build().map_err(|e| e.to_string())?;
+    if max { let _ = win.maximize(); }
+    // закрытие — запомнить размер и место (как window.json в Electron-версии)
+    { let w2 = win.clone(); let a2 = app.clone(); win.on_window_event(move |e| { if matches!(e, tauri::WindowEvent::CloseRequested { .. }) { win_save(&a2, &w2); } }); }
     Ok(())
+}
+
+/// Размер и место окна (window.json: x, y, w, h, max — в точках экрана, как у Electron): прошлые — только если окно
+/// хотя бы наполовину видно на одном из экранов; иначе — 1440×900 по центру основного экрана. Первый запуск —
+/// размер из Electron-версии (её файл только читается).
+fn win_bounds(app: &tauri::AppHandle) -> (f64, f64, f64, f64, bool) {
+    let read = |p: PathBuf| -> Option<serde_json::Value> { std::fs::read_to_string(p).ok().and_then(|s| serde_json::from_str(&s).ok()) };
+    let st = read(data_dir(app).join("window.json")).or_else(|| migrate::electron_dir().and_then(|d| read(d.join("window.json")))).unwrap_or(serde_json::Value::Null);
+    let mons: Vec<(f64, f64, f64, f64)> = app.available_monitors().unwrap_or_default().iter().map(|m| {
+        let sf = m.scale_factor(); let p = m.position(); let z = m.size();
+        (p.x as f64 / sf, p.y as f64 / sf, z.width as f64 / sf, z.height as f64 / sf)
+    }).collect();
+    let prim = app.primary_monitor().ok().flatten().map(|m| { let sf = m.scale_factor(); let p = m.position(); let z = m.size(); (p.x as f64 / sf, p.y as f64 / sf, z.width as f64 / sf, z.height as f64 / sf) })
+        .or_else(|| mons.first().copied()).unwrap_or((0.0, 0.0, 1440.0, 900.0));
+    let (w0, h0) = (1440f64.min(prim.2), 900f64.min(prim.3 - 40.0).max(680.0));
+    let def = (prim.0 + (prim.2 - w0) / 2.0, prim.1 + (prim.3 - h0) / 2.0, w0, h0);
+    let max = st["max"].as_bool().unwrap_or(false);
+    let (Some(x), Some(y), Some(w), Some(h)) = (st["x"].as_f64(), st["y"].as_f64(), st["w"].as_f64(), st["h"].as_f64()) else { return (def.0, def.1, def.2, def.3, max) };
+    if w < 200.0 || h < 200.0 { return (def.0, def.1, def.2, def.3, max); }
+    let vis = |d: &(f64, f64, f64, f64)| ((x + w).min(d.0 + d.2) - x.max(d.0)).max(0.0) * ((y + h).min(d.1 + d.3) - y.max(d.1)).max(0.0);
+    match mons.iter().max_by(|a, b| vis(a).total_cmp(&vis(b))) {
+        Some(d) if vis(d) >= w * h * 0.5 && y >= d.1 - 8.0 => {
+            let (w, h) = (w.min(d.2), h.min(d.3));
+            (x.clamp(d.0, d.0 + d.2 - w), y.clamp(d.1, d.1 + d.3 - h), w, h, max)
+        }
+        _ => (def.0, def.1, def.2, def.3, max),
+    }
+}
+fn win_save(app: &tauri::AppHandle, w: &tauri::WebviewWindow) {
+    let sf = w.scale_factor().unwrap_or(1.0);
+    let max = w.is_maximized().unwrap_or(false);
+    if w.is_minimized().unwrap_or(false) { return; }
+    let (Ok(p), Ok(z)) = (w.outer_position(), w.inner_size()) else { return };
+    let d = data_dir(app);
+    let _ = std::fs::create_dir_all(&d);
+    let mut v = serde_json::json!({ "x": (p.x as f64 / sf).round(), "y": (p.y as f64 / sf).round(), "w": (z.width as f64 / sf).round(), "h": (z.height as f64 / sf).round(), "max": max });
+    // развёрнутое окно: прежний обычный размер не теряем
+    if max { if let Some(o) = std::fs::read_to_string(d.join("window.json")).ok().and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()) { for k in ["x", "y", "w", "h"] { v[k] = o[k].clone(); } } }
+    let _ = std::fs::write(d.join("window.json"), v.to_string());
 }
 
 const EXT_HOSTS: [&str; 6] = ["yandex.ru", "yandex.com", "github.com", "lrclib.net", "oqelon.github.io", "t.me"];
@@ -660,7 +708,8 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            if let Some(m) = lab_media(app.handle()) { lab::setup(m); }
+            if !RELEASE { if let Some(m) = lab_media(app.handle()) { lab::setup(m); } }
+            else { let h = app.handle().clone(); tauri::async_runtime::spawn(async move { let _ = open_ui(h).await; }); }
             engine::start(Some(app.handle().clone()));
             // этап 5: перенос данных из Electron-версии — сам при первом запуске (решение владельца)
             let h = app.handle().clone();
@@ -696,7 +745,13 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams, lab_ya_log, lab_ya_log_last, lab_ya_recent, lab_nav_log, local_list, local_pick, local_pick_files, local_add, local_remove, local_rescan, local_hide, local_unhide, local_reveal, dsd_info, pack_info, dsd_convert, migrate_status, migrate_applied, migrate_restored, migrate_rerun, migrate_restore, social_get, social_set, ya_add, token_set, ya_login, engine_create, engine_drop, engine_open, engine_play, engine_pause, engine_seek, engine_volume, engine_rate, engine_state, engine_eq, engine_tap, engine_info, engine_stats, engine_devices, engine_set_device, upd_check, upd_prepare, upd_install, upd_restart, upd_ready, upd_test_feed, cd_piece, cd_drives, cd_begin, cd_put, cd_burn, cd_eject, cd_cancel, cdw_pick_files, cdw_pick_folder, cdw_add_paths, cdw_pick_out, cdw_open, cdw_write, cdw_finish, cdw_abort, cdw_reveal, discord_enable, discord_set, discord_state, online_get, dev_unlock, dev_devtools, perf_info, perf_slow, perf_unsafe, perf_relaunch, audio_cors, app_version])
         .build(tauri::generate_context!())
         .expect("не удалось запустить Пульс (Tauri)")
-        .run(|_app, ev| { if let tauri::RunEvent::Exit = ev { cd::on_exit(); updater::on_exit(); } });
+        .run(|app, ev| match ev {
+            tauri::RunEvent::Exit => { cd::on_exit(); updater::on_exit(); }
+            // нажали на значок в Dock, а окна нет — открыть «Пульс» (в тестовой сборке окно открывается из лаборатории)
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen { has_visible_windows: false, .. } if RELEASE => { let h = app.clone(); tauri::async_runtime::spawn(async move { let _ = open_ui(h).await; }); }
+            _ => {}
+        });
 }
 
 #[cfg(test)]

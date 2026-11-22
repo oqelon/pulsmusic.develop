@@ -1,0 +1,14 @@
+{
+  "productName": "Pulse",
+  "identifier": "ru.pulse.desktop",
+  "app": {
+    "windows": []
+  },
+  "bundle": {
+    "targets": ["app"],
+    "resources": {
+      "../lab-media/": null,
+      "../app-meta/package.json": "app/package.json"
+    }
+  }
+}

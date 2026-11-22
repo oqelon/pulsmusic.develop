@@ -33,7 +33,10 @@ jobs:
         run: node desktop-tauri/bridge/test.cjs desktop-tauri/ui/pulse-bridge.js
       - name: Проверки Rust (cargo test)
         working-directory: desktop-tauri/src-tauri
-        run: cargo test --release --target aarch64-apple-darwin -- --test-threads=4
+        run: |
+          cargo test --release --target aarch64-apple-darwin -- --test-threads=4
+          # выпускной вариант (без лаборатории) тоже должен собираться
+          PULSE_RELEASE=1 cargo check --release --target aarch64-apple-darwin
       - name: Сборка
         working-directory: desktop-tauri
         env:

@@ -1,0 +1,99 @@
+# Выпускная сборка Tauri-версии «Пульса» для Mac (этап 6.4) — ТОЛЬКО ВРУЧНУЮ (workflow_dispatch).
+# Собирает Pulse.app (Apple M и Intel) без «Лаборатории» и тестовых файлов, с постоянным идентификатором
+# ru.pulse.desktop, и кладёт в ПРЕДВАРИТЕЛЬНЫЙ релиз tauri-rc-<версия>: архивы Pulse-Mac-Apple-M.zip, Pulse-Mac-Intel.zip
+# и неподписанные mac.json / latest.json. Без подписи разработчика (её ставит только разработчик своим ключом, и только
+# после «выпускай» владельца) ни обычный «Пульс», ни Tauri-версия это обновление не возьмут.
+name: Tauri — выпускная сборка для Mac (вручную)
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Версия (например 0.39.0)'
+        required: true
+permissions:
+  contents: write
+concurrency: tauri-release
+jobs:
+  mac:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    strategy:
+      matrix:
+        include:
+          - { target: aarch64-apple-darwin, arch: arm64, zip: Pulse-Mac-Apple-M.zip }
+          - { target: x86_64-apple-darwin, arch: x64, zip: Pulse-Mac-Intel.zip }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop-tauri/src-tauri -> target
+      - name: Интерфейс
+        run: bash desktop-tauri/prepare-ui.sh 0.38.0
+      - name: Проверки
+        run: |
+          node desktop-tauri/bridge/test.cjs desktop-tauri/ui/pulse-bridge.js
+          cd desktop-tauri/src-tauri && cargo test --release --target aarch64-apple-darwin -- --test-threads=4
+      - name: Сборка
+        working-directory: desktop-tauri
+        env:
+          CI: 'true'
+          PULSE_RELEASE: '1'
+          VER: ${{ github.event.inputs.version }}
+        run: |
+          echo "$VER" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "версия: $VER"; exit 1; }
+          rm -f ui/lab.html
+          node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('src-tauri/tauri.release.conf.json','utf8'));c.version=process.env.VER;fs.writeFileSync('rel.conf.json',JSON.stringify(c,null,2));fs.writeFileSync('app-meta/package.json',JSON.stringify({name:'pulse',productName:'Пульс',version:process.env.VER,engine:'tauri',build:0},null,2)+'\n')"
+          npx --yes @tauri-apps/cli@2 build --target ${{ matrix.target }} --bundles app --ci --config rel.conf.json
+      - name: Упаковка
+        run: |
+          B=desktop-tauri/src-tauri/target/${{ matrix.target }}/release/bundle/macos
+          ls -la "$B"
+          test -d "$B/Pulse.app"
+          cat "$B/Pulse.app/Contents/Resources/app/package.json"
+          test ! -e "$B/Pulse.app/Contents/Resources/lab-media" && echo "лаборатории нет — ок"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$B/Pulse.app/Contents/Info.plist"
+          codesign --verify --deep "$B/Pulse.app" && echo "codesign --verify --deep: ок"
+          mkdir -p out && ditto -c -k --keepParent "$B/Pulse.app" "out/${{ matrix.zip }}"
+          du -sh "$B/Pulse.app" out/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.arch }}
+          path: out/${{ matrix.zip }}
+  publish:
+    needs: mac
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: Неподписанные mac.json и latest.json, предварительный релиз
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VER: ${{ github.event.inputs.version }}
+        run: |
+          TAG="tauri-rc-$VER"
+          python3 - "$VER" "$GITHUB_REPOSITORY" "$TAG" <<'PY'
+          import hashlib, json, sys
+          v, repo, tag = sys.argv[1:4]
+          base = f"https://github.com/{repo}/releases/download/{tag}/"
+          m = {"version": v, "engine": "tauri"}
+          for arch, name in (("arm64", "Pulse-Mac-Apple-M.zip"), ("x64", "Pulse-Mac-Intel.zip")):
+              b = open("out/" + name, "rb").read()
+              m[arch] = {"url": base + name, "sha256": hashlib.sha256(b).hexdigest(), "size": len(b)}
+          json.dump(m, open("out/mac.json", "w"), indent=2)
+          a = m["arm64"]
+          # для Electron-версии: minElectron выше любой Electron — «новый движок» (программа целиком из mac.json)
+          l = {"version": v, "engine": "tauri", "url": a["url"], "sha256": a["sha256"], "size": a["size"], "minElectron": "999.0.0",
+               "installer": f"https://github.com/{repo}/releases/latest", "online": "https://pulse-online.pulsmusic.workers.dev", "notes": []}
+          json.dump(l, open("out/latest.json", "w"), indent=2, ensure_ascii=False)
+          print(json.dumps(m, indent=2))
+          PY
+          gh release create "$TAG" out/* -R "$GITHUB_REPOSITORY" --prerelease --latest=false --target "$GITHUB_SHA" --title "Tauri: выпускная сборка $VER (не опубликована)" --notes "Выпускная сборка Tauri-версии для проверки. Без подписи разработчика её не возьмёт ни одно обновление."

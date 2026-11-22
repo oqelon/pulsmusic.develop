@@ -26,7 +26,7 @@ use std::sync::Mutex;
 use serde_json::{json, Value};
 use tauri::Manager;
 
-const KS: &str = "ru.pulse.desktop.tauritest";
+const KS: &str = if crate::RELEASE { "ru.pulse.desktop" } else { "ru.pulse.desktop.tauritest" };
 static RUN: Mutex<()> = Mutex::new(());
 
 fn now_stamp() -> (u64, String) {
