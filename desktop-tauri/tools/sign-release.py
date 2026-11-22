@@ -31,6 +31,10 @@ def asset(name):
     assert len(b) == a["size"], f"{name}: скачалось {len(b)} из {a['size']}"
     return {"url": PKG + name, "sha256": hashlib.sha256(b).hexdigest(), "size": len(b)}
 
+NOTES = {
+    "0.39.0": ["Новая версия «Пульса»: свой звуковой движок — быстрее и легче", "Новая карточка исполнителя: фото во всю шапку, «Об исполнителе» — отдельной кнопкой", "Лайки, плейлисты, история, вход и ключи друзей переносятся сами"],
+    "0.40.0": ["Карточка исполнителя: фото мягко растворяется в фоне, галочка — под именем", "При прокрутке шапка исполнителя красиво уходит вглубь", "В альбоме самые популярные треки отмечены точкой вместо номера", "С обычного «Пульса» — переход на новую версию: данные и вход переносятся сами"],
+}
 mac = {"version": ver, "engine": "tauri"}
 for arch, name in (("arm64", "Pulse-Mac-Apple-M.zip"), ("x64", "Pulse-Mac-Intel.zip")):
     a = asset(name); a["sig"] = sign("\n".join(["PULSE-MAC-V1", ver, arch, a["sha256"], str(a["size"])])); mac[arch] = a
@@ -45,7 +49,11 @@ b = open(zp, "rb").read()
 prev = json.load(open(os.path.join(repo_dir, "updates", "latest.json")))
 lat = {"version": ver, "url": PKG + f"pulse-app-{ver}.zip", "sha256": hashlib.sha256(b).hexdigest(), "size": len(b), "minElectron": prev.get("minElectron", "33.2.1"),
        "date": datetime.date.today().isoformat(), "installer": f"https://github.com/{REPO}/releases/latest",
-       "notes": ["Новая версия «Пульса»: свой звуковой движок — быстрее и легче", "Новая карточка исполнителя: фото во всю шапку, «Об исполнителе» — отдельной кнопкой", "Лайки, плейлисты, история, вход и ключи друзей переносятся сами"]}
+       "notes": NOTES.get(ver, NOTES["0.39.0"])}
+# engine: "tauri" — с 0.40.0: по этому полю уже установленная Tauri-версия понимает, что релиз — для неё
+# (обычный «Пульс» на Electron поле не читает и, как раньше, получает переходный пакет). В подпись поле не входит —
+# скачанная программа всё равно проверяется по mac.json / win.json и по своему package.json.
+if ver != "0.39.0": lat["engine"] = "tauri"
 for k in ("online",):
     if k in prev: lat[k] = prev[k]
 lat["sig"] = sign("\n".join(["PULSE-UPDATE-V1", ver, lat["sha256"], str(lat["size"]), lat["minElectron"]]))
