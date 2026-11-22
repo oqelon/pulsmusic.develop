@@ -94,13 +94,26 @@
     if (raw && !shapes[raw.length]) { shapes[raw.length] = 1; if (v !== raw) enote('token', 'введено: ' + tokShape(raw) + ' → взят токен: ' + tokShape(v)); }
     return v;
   }
+  // похоже ли на токен: только латиница, цифры, «._-», разумная длина. Иначе это не токен — в запрос его не кладём
+  // (WebKit отвергает такой заголовок, и выглядело бы как «Яндекс не отвечает»).
+  function tokOk(v) { return !v || (v.length <= 300 && /^[A-Za-z0-9._-]+$/.test(v)); }
+  function notToken(raw) {
+    return 'В поле вставлен не токен (' + String(raw || '').length + ' символов, в тексте нет access_token и нет токена вида y0_…). ' +
+      'Нажмите «Получить токен» — откроется окно входа в Яндекс, и программа сама заберёт токен';
+  }
 
   var P = {};
   // как ym:<метод> в main.js: { ok, v, tokenProblem } или { ok: false, error }
   ['account', 'search', 'chart', 'artist', 'artistInfo', 'album', 'wave', 'waveFeedback', 'stream', 'lyrics', 'landing', 'playlist', 'likes', 'tracksById', 'likeSet'].forEach(function (m) {
     P[m] = function () {
       var args = Array.prototype.slice.call(arguments);
-      if (args.length) args[0] = tok(args[0]);
+      if (args.length) {
+        var raw0 = args[0]; args[0] = tok(args[0]);
+        if (!tokOk(args[0])) {
+          if (m === 'account') return Promise.resolve({ ok: true, v: { auth: false, kind: 'bad', error: notToken(raw0) }, tokenProblem: 'Токен не подошёл' });
+          args[0] = '';
+        }
+      }
       return Promise.resolve().then(function () { return ya[m].apply(ya, args); })
         .then(function (v) { return { ok: true, v: v, tokenProblem: ya.tokenProblem() }; })
         .catch(function (e) { console.log('[ym]', m, '→', e && e.message); return { ok: false, error: String((e && e.message) || e) }; });
@@ -112,9 +125,11 @@
   // как app:version в Electron — функция, возвращающая обещание (Program.jsx вызывает window.pulse.version())
   P.version = function () { return Promise.resolve('0.38.0-tauri-test'); };
   P.initialToken = token0;
-  P.saveToken = function (t) { var v = tok(t); if (v.length > 4096) { enote('token', 'не сохранён: ' + tokShape(v)); return Promise.resolve(false); } return invoke('token_set', { token: v }); };
+  P.saveToken = function (t) { var v = tok(t); if (!tokOk(v)) { enote('token', 'не сохранён: ' + tokShape(v)); return Promise.resolve(false); } return invoke('token_set', { token: v }); };
   P.openExternal = function (u) {
     u = String(u || '');
+    // «Получить токен» → окно входа в Яндекс внутри программы (токен программа заберёт сама)
+    if (/^https:\/\/oauth\.yandex\.(ru|com)\/authorize/i.test(u)) return invoke('ya_login').then(function () { return true; }, function (e) { enote('login', String(e)); return false; });
     if (!/^https:\/\//i.test(u)) return Promise.resolve(false);
     return (T.opener && T.opener.openUrl ? T.opener.openUrl(u) : Promise.reject(new Error('нет opener'))).then(function () { return true; }, function (e) { console.log('[pulse] openExternal', e); return false; });
   };

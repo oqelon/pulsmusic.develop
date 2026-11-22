@@ -42,6 +42,12 @@ eval(fs.readFileSync(process.argv[2], 'utf8'));
   calls.length = 0;
   await pulse.account('Токен:\n y0_AbcdefGHIJKLMNOPQRSTUVWX123 \nконец');
   assert.strictEqual(calls.find((c) => c[0] === 'fetch')[2].Authorization, 'OAuth y0_AbcdefGHIJKLMNOPQRSTUVWX123');
+  // мусор вместо токена: без запроса, понятная ошибка
+  calls.length = 0;
+  const junk = await pulse.account('Какой-то текст страницы '.repeat(400));
+  assert.strictEqual(junk.v.auth, false); assert.ok(/не токен/.test(junk.v.error)); assert.strictEqual(calls.filter((c) => c[0] === 'fetch').length, 0);
+  const ch = await pulse.chart('мусор с пробелами'); assert.ok(!calls.some((c) => c[0] === 'fetch' && c[2].Authorization), 'мусор ушёл в заголовок');
+  calls.length = 0; await pulse.openExternal('https://oauth.yandex.ru/authorize?response_type=token&client_id=x'); assert.ok(calls.some((c) => c[1] === 'ya_login'));
   console.error(new Error('проба OAuth y0_SECRET'));
   const el = JSON.parse(store['pulse.tauritest.errors']); assert.ok(el.some((x) => x.k === 'console' && x.m.includes('[токен]') && !x.m.includes('SECRET')), 'журнал ошибок прячет токен');
   assert.strictEqual(typeof (await pulse.version()), 'string');

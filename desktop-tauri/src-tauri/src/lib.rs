@@ -138,6 +138,47 @@ fn lab_streams() -> Vec<serde_json::Value> {
 #[tauri::command]
 fn lab_ya_log(id: String) -> Vec<yastream::LogRow> { yastream::log_of(&id) }
 
+// токен из адреса, на который Яндекс возвращает после входа: «…#access_token=<токен>&token_type=…»
+fn token_from_url(u: &str) -> Option<String> {
+    let i = u.find("access_token=")? + "access_token=".len();
+    let t: String = u[i..].chars().take_while(|c| *c != '&' && *c != '#').collect();
+    let ok = (10..=300).contains(&t.len()) && t.chars().all(|c| c.is_ascii_alphanumeric() || "._-".contains(c));
+    if ok { Some(t) } else { None }
+}
+
+// Вход в Яндекс прямо в программе: окно с той же страницей oauth.yandex.ru, что открывалась в браузере (тот же
+// client_id). Когда Яндекс возвращает на адрес с access_token, программа сама забирает токен — копировать и вставлять
+// ничего не нужно. Окно входа — обычная страница Яндекса, доступа к программе у неё нет; токен сохраняется в
+// Связку ключей, окно «Пульса» открывается заново и входит с ним.
+#[tauri::command]
+async fn ya_login(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window("login") { let _ = w.show(); let _ = w.set_focus(); return Ok(()); }
+    let url = "https://oauth.yandex.ru/authorize?response_type=token&client_id=23cabbbdc6cd418abb4b39c32c41195d".parse::<tauri::Url>().map_err(|e| e.to_string())?;
+    let h = app.clone();
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    WebviewWindowBuilder::new(&app, "login", WebviewUrl::External(url))
+        .title("Вход в Яндекс Музыку")
+        .inner_size(520.0, 760.0)
+        .on_navigation(move |u| {
+            let Some(t) = token_from_url(u.as_str()) else { return true };
+            if done.swap(true, Ordering::SeqCst) { return false; }
+            let saved = token_set(t).is_ok();
+            let h2 = h.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Some(w) = h2.get_webview_window("login") { let _ = w.close(); }
+                if !saved { return; }
+                // окно «Пульса» — заново: токен передаётся в окно только при его открытии
+                if let Some(m) = h2.get_webview_window("main") { let _ = m.destroy(); }
+                let _ = tauri::async_runtime::spawn_blocking(|| std::thread::sleep(std::time::Duration::from_millis(300))).await;
+                let _ = open_ui(h2.clone()).await;
+            });
+            false
+        })
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
 async fn open_ui(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(w) = app.get_webview_window("main") { let _ = w.show(); let _ = w.set_focus(); return Ok(()); }
@@ -186,7 +227,19 @@ pub fn run() {
                 responder.respond(r);
             });
         })
-        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams, lab_ya_log, ya_add, token_set])
+        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams, lab_ya_log, ya_add, token_set, ya_login])
         .run(tauri::generate_context!())
         .expect("не удалось запустить Пульс (Tauri)");
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn token_from_redirect() {
+        use super::token_from_url as t;
+        assert_eq!(t("https://music.yandex.ru/#access_token=y0_AgAAAAB-xyz_123&token_type=bearer&expires_in=31536000"), Some("y0_AgAAAAB-xyz_123".into()));
+        assert_eq!(t("https://music.yandex.ru/#access_token=short"), None);
+        assert_eq!(t("https://oauth.yandex.ru/authorize?response_type=token"), None);
+        assert_eq!(t("https://x/#access_token=bad<script>alert(1)"), None);
+    }
 }
