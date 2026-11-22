@@ -965,7 +965,8 @@ mod tests {
         let prod = std::thread::spawn(move || {
             let mut x = 0u64; let mut sz = 2usize;
             while x < total {
-                let chunk: Vec<f32> = (0..sz as u64).map(|i| ((x + i) % 1_000_000) as f32).collect();
+                let k = (sz as u64).min(total - x);
+                let chunk: Vec<f32> = (0..k).map(|i| ((x + i) % 1_000_000) as f32).collect();
                 let put = r2.push(&chunk) as u64; x += put;
                 if put == 0 { std::thread::yield_now(); }
                 sz = (if sz >= 3000 { 2 } else { sz * 3 + 2 }) & !1;
