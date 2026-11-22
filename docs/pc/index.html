@@ -235,18 +235,6 @@ footer a { text-decoration: none; }
   </div>
 </section>
 
-<section class="blk">
-  <div class="in">
-    <div class="news-box">
-      <div class="l">
-        <span class="k">Версия <span id="ver2">…</span></span>
-        <h2>Обновляется сама</h2>
-        <p>Новые версии приходят прямо в программу — скачивать установщик заново не нужно.</p>
-      </div>
-      <ul class="news" id="news"><li>Загружаю…</li></ul>
-    </div>
-  </div>
-</section>
 
 <section class="blk">
   <div class="in">
@@ -295,14 +283,13 @@ footer a { text-decoration: none; }
     let d = null; const k = 'pulse.pc.latest';
     try { const c = JSON.parse(localStorage.getItem(k) || 'null'); if (c && Date.now() - c.t < 10 * 60e3) d = c.v; } catch {}
     if (!d) { try { const r = await fetch('https://api.github.com/repos/' + REPO + '/releases/latest', { headers: { Accept: 'application/vnd.github+json' } }); if (r.ok) { d = await r.json(); try { localStorage.setItem(k, JSON.stringify({ t: Date.now(), v: d })); } catch {} } } catch {} }
-    if (!d) { $('ver').remove(); $('ver2').parentNode.textContent = 'Последняя версия'; $('news').innerHTML = '<li>Список изменений — на GitHub</li>'; return; }
+    if (!d) { if ($('ver')) $('ver').remove(); return; }
     const v = String(d.tag_name || '').replace(/^v/, '');
-    $('ver').textContent = v; $('ver2').textContent = v;
-    if (d.published_at) $('date').textContent = ' · ' + new Date(d.published_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
+    if ($('ver')) $('ver').textContent = v;
+    if (d.published_at && $('date')) $('date').textContent = ' · ' + new Date(d.published_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
     const A = d.assets || [];
     const set = (key, re) => { const a = A.find((x) => re.test(x.name)); if (a) { $('m-' + key).textContent = mb(a.size) + ' · ' + a.name; $('b-' + key).href = a.browser_download_url; if ($('b-hero').dataset.k === key) $('b-hero').href = a.browser_download_url; } };
     set('win', /Setup\.exe$/i); set('arm', /^Pulse-Mac-Apple-M\.zip$/); set('intel', /^Pulse-Mac-Intel\.zip$/);
-    const n = lines(d.body); $('news').innerHTML = (n.length ? n : ['Исправления и улучшения']).map((s) => '<li>' + esc(s) + '</li>').join('');
   })();
 })();
 </script>
