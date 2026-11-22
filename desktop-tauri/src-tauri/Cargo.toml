@@ -25,6 +25,10 @@ getrandom = "0.2"
 # этап 4: запросы к Яндексу из окна, открытие ссылок, токен в Связке ключей
 tauri-plugin-http = { version = "2", features = ["unsafe-headers"] }
 tauri-plugin-opener = "2"
+# PULSE Audio Engine: вывод звука, декодирование, пересчёт частоты
+cpal = "0.15"
+symphonia = { version = "0.5", features = ["all"] }
+rubato = "0.15"
 keyring = { version = "3", features = ["apple-native", "windows-native"] }
 
 [profile.release]

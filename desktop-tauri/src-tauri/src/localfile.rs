@@ -35,6 +35,9 @@ fn covers() -> &'static Mutex<HashMap<String, PathBuf>> {
     C.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Для аудиодвижка: источник по номеру.
+pub fn get(id: &str) -> Option<Src> { files().lock().ok().and_then(|m| m.get(id).cloned()) }
+
 pub fn register(id: &str, s: Src) { if let Ok(mut m) = files().lock() { m.insert(id.to_string(), s); } }
 pub fn register_cover(id: &str, p: PathBuf) { if let Ok(mut m) = covers().lock() { m.insert(id.to_string(), p); } }
 #[allow(dead_code)]
@@ -77,9 +80,9 @@ pub fn wav_head(n: u64) -> [u8; 44] {
 }
 
 /// Открытый источник: длина и чтение куска с любого места.
-struct Opened { len: u64, f: File, off: u64, head: Option<[u8; 44]> }
+pub struct Opened { pub len: u64, f: File, off: u64, head: Option<[u8; 44]> }
 impl Opened {
-    fn open(s: &Src) -> std::io::Result<Opened> {
+    pub fn open(s: &Src) -> std::io::Result<Opened> {
         match s {
             Src::File(p) => { let f = File::open(p)?; let len = f.metadata()?.len(); Ok(Opened { len, f, off: 0, head: None }) }
             Src::Slice { src, off, size, wav, .. } => {
@@ -91,7 +94,7 @@ impl Opened {
             }
         }
     }
-    fn read(&mut self, mut pos: u64, n: u64) -> std::io::Result<Vec<u8>> {
+    pub fn read(&mut self, mut pos: u64, n: u64) -> std::io::Result<Vec<u8>> {
         let mut out = Vec::with_capacity(n as usize);
         let end = (pos + n).min(self.len);
         if let Some(h) = &self.head {

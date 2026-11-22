@@ -6,4 +6,4 @@ commands.allow = ["pick_files", "save_report", "env_info", "open_ui", "ya_fmt", 
 [[permission]]
 identifier = "allow-player"
 description = "Окно «Пульса»: зарегистрировать ссылку на звук Яндекса (ya_add), узнать её формат (ya_fmt), сохранить токен в Связке ключей (token_set)."
-commands.allow = ["ya_fmt", "ya_add", "token_set", "ya_login"]
+commands.allow = ["ya_fmt", "ya_add", "token_set", "ya_login", "engine_create", "engine_drop", "engine_open", "engine_play", "engine_pause", "engine_seek", "engine_volume", "engine_rate", "engine_state", "engine_eq", "engine_tap", "engine_info", "engine_devices", "engine_set_device"]

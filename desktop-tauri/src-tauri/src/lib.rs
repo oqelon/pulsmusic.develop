@@ -11,6 +11,7 @@
 // CD, Discord, обновления (этап 6). Данные этой сборки хранятся отдельно (ru.pulse.desktop.tauritest) — обычный
 // «Пульс» на Electron, его настройки, лайки и токен она не видит и не трогает.
 
+mod engine;
 mod lab;
 mod localfile;
 mod resp;
@@ -240,6 +241,23 @@ async fn open_ui(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+// ——— PULSE Audio Engine: команды окна (см. engine.rs) ———
+fn eng() -> Result<&'static engine::Engine, String> { engine::get().ok_or_else(|| "движок не запущен".to_string()) }
+#[tauri::command] fn engine_create() -> Result<u32, String> { Ok(eng()?.create()) }
+#[tauri::command] fn engine_drop(v: u32) -> Result<(), String> { eng()?.drop_voice(v); Ok(()) }
+#[tauri::command] fn engine_open(v: u32, url: String, start: f64) -> Result<(), String> { eng()?.open(v, url, start); Ok(()) }
+#[tauri::command] fn engine_play(v: u32) -> Result<(), String> { eng()?.play(v); Ok(()) }
+#[tauri::command] fn engine_pause(v: u32) -> Result<(), String> { eng()?.pause(v); Ok(()) }
+#[tauri::command] fn engine_seek(v: u32, t: f64) -> Result<(), String> { eng()?.seek(v, t); Ok(()) }
+#[tauri::command] fn engine_volume(v: u32, x: f32) -> Result<(), String> { eng()?.volume(v, x); Ok(()) }
+#[tauri::command] fn engine_rate(v: u32, r: f32) -> Result<(), String> { eng()?.rate(v, r); Ok(()) }
+#[tauri::command] fn engine_state(v: u32) -> Result<Option<engine::VoiceState>, String> { Ok(eng()?.state(v)) }
+#[tauri::command] fn engine_eq(on: bool, g: Vec<f32>, pre: f32, lim: bool) -> Result<(), String> { eng()?.set_eq(on, g, pre, lim); Ok(()) }
+#[tauri::command] fn engine_tap(n: usize) -> Result<Vec<f32>, String> { Ok(eng()?.tap(n)) }
+#[tauri::command] fn engine_info() -> Result<serde_json::Value, String> { let e = eng()?; Ok(serde_json::json!({ "rate": e.out_rate(), "device": e.device_now() })) }
+#[tauri::command] fn engine_devices() -> Vec<String> { engine::devices() }
+#[tauri::command] fn engine_set_device(name: String) -> Result<(), String> { eng()?.set_device(name); Ok(()) }
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -248,6 +266,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             if let Some(m) = lab_media(app.handle()) { lab::setup(m); }
+            engine::start(Some(app.handle().clone()));
             Ok(())
         })
         .register_asynchronous_uri_scheme_protocol("pulsetest", |ctx, req, responder| {
@@ -271,7 +290,7 @@ pub fn run() {
                 responder.respond(r);
             });
         })
-        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams, lab_ya_log, lab_ya_log_last, lab_ya_recent, ya_add, token_set, ya_login])
+        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams, lab_ya_log, lab_ya_log_last, lab_ya_recent, ya_add, token_set, ya_login, engine_create, engine_drop, engine_open, engine_play, engine_pause, engine_seek, engine_volume, engine_rate, engine_state, engine_eq, engine_tap, engine_info, engine_devices, engine_set_device])
         .run(tauri::generate_context!())
         .expect("не удалось запустить Пульс (Tauri)");
 }

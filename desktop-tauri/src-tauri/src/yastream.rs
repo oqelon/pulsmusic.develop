@@ -388,6 +388,42 @@ async fn blocks(id: &str, urls: &[String], key: &Option<Vec<u8>>, i0: u64, i1: u
     Ok((total.unwrap_or(0), have))
 }
 
+/// Для аудиодвижка: тип звука трека (по кодеку от Яндекса).
+pub fn mime_of_id(id: &str) -> Option<&'static str> { reg().lock().ok()?.get(id).map(|e| e.mime) }
+
+/// Для аудиодвижка: байты [a, b] трека (расшифрованные, через кэш и прогрев). → (длина файла, данные)
+pub async fn read_range(id: &str, a: u64, b: u64) -> Result<(u64, Vec<u8>), String> {
+    let (urls, key) = {
+        let r = reg().lock().map_err(|_| "реестр".to_string())?;
+        let e = r.get(id).ok_or_else(|| "нет такого звука".to_string())?;
+        (e.urls.clone(), e.key.clone())
+    };
+    let err = |e: FetchErr| match e { FetchErr::NotSatisfiable(t) => format!("за пределами файла ({t})"), FetchErr::Other(m) => m };
+    let total = match cache_total(id) {
+        Some(t) => t,
+        None => match blocks(id, &urls, &key, a / BLOCK, a / BLOCK + FIRST_RUN - 1).await {
+            Ok((t, _)) => t,
+            Err(FetchErr::NotSatisfiable(_)) => blocks(id, &urls, &key, a / BLOCK, a / BLOCK).await.map_err(err)?.0,
+            Err(e) => return Err(err(e)),
+        },
+    };
+    prefetch(id, urls.clone(), key.clone(), total);
+    if total == 0 || a >= total { return Ok((total, Vec::new())); }
+    let b = b.min(total - 1);
+    let (i0, i1) = (a / BLOCK, b / BLOCK);
+    let have = blocks(id, &urls, &key, i0, i1).await.map_err(err)?.1;
+    let mut out = Vec::with_capacity((b - a + 1) as usize);
+    for i in i0..=i1 {
+        let blk = have.get(&i).ok_or("блок потерян")?;
+        let bs = i * BLOCK;
+        let from = (a.max(bs) - bs) as usize;
+        let to = ((b.min(bs + BLOCK - 1) - bs + 1) as usize).min(blk.len());
+        if from >= to { break; }
+        out.extend_from_slice(&blk[from..to]);
+    }
+    Ok((total, out))
+}
+
 async fn serve_inner(id: &str, range: Option<String>) -> Response<Vec<u8>> {
     let (urls, key, mime, chunk) = {
         let Ok(r) = reg().lock() else { return resp::plain(StatusCode::INTERNAL_SERVER_ERROR, "реестр") };
