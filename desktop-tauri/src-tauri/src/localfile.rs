@@ -137,6 +137,26 @@ pub fn serve(section: &str, id: &str, range: Option<String>) -> Response<Vec<u8>
     }
 }
 
+
+/// Файл из списка как поток чтения с перемоткой (для DSD-декодера и сохранения).
+pub struct Reader { o: Opened, pos: u64 }
+impl Reader { pub fn new(o: Opened) -> Reader { Reader { o, pos: 0 } } }
+impl std::io::Read for Reader {
+    fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+        if self.pos >= self.o.len || out.is_empty() { return Ok(0); }
+        let n = (out.len() as u64).min(self.o.len - self.pos);
+        let d = self.o.read(self.pos, n)?;
+        out[..d.len()].copy_from_slice(&d); self.pos += d.len() as u64; Ok(d.len())
+    }
+}
+impl std::io::Seek for Reader {
+    fn seek(&mut self, p: std::io::SeekFrom) -> std::io::Result<u64> {
+        let np = match p { std::io::SeekFrom::Start(x) => x as i64, std::io::SeekFrom::End(x) => self.o.len as i64 + x, std::io::SeekFrom::Current(x) => self.pos as i64 + x };
+        if np < 0 { return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "до начала файла")); }
+        self.pos = np as u64; Ok(self.pos)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

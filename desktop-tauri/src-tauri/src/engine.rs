@@ -440,12 +440,16 @@ fn open_source(url: &str) -> Result<(Box<dyn MediaSource>, Hint), (String, Strin
 
 // ——————————————————————————— декодер ———————————————————————————
 
+/// откуда берётся PCM: Symphonia (MP3, AAC, FLAC, ALAC, WAV, OGG, AIFF…) или свой декодер DSD (dsd.rs)
+enum Body {
+    Sym { format: Box<dyn FormatReader>, dec: Box<dyn Decoder>, track_id: u32, tb: Option<TimeBase> },
+    Dsd(crate::dsd::Reader),
+}
+enum Next { Pcm(Vec<f32>, Vec<f32>), Skip, Eof, Err(String, String) }
+
 struct Track {
-    format: Box<dyn FormatReader>,
-    dec: Box<dyn Decoder>,
-    track_id: u32,
+    body: Body,
     sr: u32,
-    tb: Option<TimeBase>,
     /// после перемотки: пропустить звук до этого места (точная перемотка)
     skip_until: Option<f64>,
     rs: Option<(SincFixedIn<f32>, u32, u32, f32)>, // ресемплер, вход, выход, скорость
@@ -454,7 +458,20 @@ struct Track {
     bad: u64,
 }
 
+fn is_dsd(url: &str) -> Option<String> {
+    let u = url.split('#').next().unwrap_or(url);
+    let id = ["pulsefile://a/", "http://pulsefile.localhost/a/"].iter().find_map(|p| u.strip_prefix(p))?.split(['/', '?']).next()?.to_string();
+    match crate::localfile::get(&id)? { crate::localfile::Src::File(p) if matches!(p.extension().map(|e| e.to_string_lossy().to_lowercase()).as_deref(), Some("dsf") | Some("dff")) => Some(id), _ => None }
+}
+
 fn open_track(url: &str) -> Result<(Track, f64), (String, String)> {
+    if let Some(id) = is_dsd(url) {
+        let src = crate::localfile::get(&id).ok_or_else(|| ("missing".to_string(), "файл больше не в списке".to_string()))?;
+        let o = crate::localfile::Opened::open(&src).map_err(|e| ("missing".to_string(), e.to_string()))?;
+        let r = crate::dsd::Reader::open(Box::new(LocalSource { o, pos: 0 })).map_err(|e| ("unsupported".to_string(), format!("DSD: {e}")))?;
+        let (sr, dur) = (r.out_rate(), r.info.duration());
+        return Ok((Track { body: Body::Dsd(r), sr, skip_until: None, rs: None, pend: [Vec::new(), Vec::new()], good: 0, bad: 0 }, dur));
+    }
     let (src, hint) = open_source(url)?;
     let mss = MediaSourceStream::new(src, Default::default());
     let probed = symphonia::default::get_probe()
@@ -472,7 +489,7 @@ fn open_track(url: &str) -> Result<(Track, f64), (String, String)> {
         (Some(n), None) => n as f64 / sr as f64,
         _ => f64::NAN,
     };
-    Ok((Track { format, dec, track_id, sr, tb: p.time_base, skip_until: None, rs: None, pend: [Vec::new(), Vec::new()], good: 0, bad: 0 }, dur))
+    Ok((Track { body: Body::Sym { format, dec, track_id, tb: p.time_base }, sr, skip_until: None, rs: None, pend: [Vec::new(), Vec::new()], good: 0, bad: 0 }, dur))
 }
 
 fn sinc() -> SincInterpolationParameters {
@@ -512,6 +529,77 @@ impl Track {
             let b = std::mem::take(&mut self.pend[1]);
             if let Ok(o) = rs.process_partial(Some(&[a, b]), None) { push(v, &o[0], &o[1]); }
         }
+    }
+    /// перемотка; Err — за конец файла (или ошибка формата)
+    fn seek_to(&mut self, t: f64) -> Result<(), String> {
+        let r = match &mut self.body {
+            Body::Dsd(d) => d.seek(t).map(|_| None),
+            Body::Sym { format, dec, track_id, .. } => {
+                let to = SeekTo::Time { time: Time::from(t.max(0.0)), track_id: Some(*track_id) };
+                match format.seek(SeekMode::Accurate, to) {
+                    Ok(_) => { dec.reset(); Ok(Some(t)) }
+                    Err(e) => {
+                        // перемотка за конец или ошибка формата — встаём в начало, если просили 0, иначе считаем концом
+                        if t < 0.5 { let _ = format.seek(SeekMode::Coarse, SeekTo::Time { time: Time::from(0.0), track_id: Some(*track_id) }); dec.reset(); Ok(None) }
+                        else { Err(e.to_string()) }
+                    }
+                }
+            }
+        };
+        self.reset_rs();
+        match r { Ok(skip) => { self.skip_until = skip; Ok(()) } Err(e) => Err(e) }
+    }
+    /// следующий кусок PCM (стерео)
+    fn next_pcm(&mut self) -> Next {
+        let (format, dec, track_id, tb) = match &mut self.body {
+            Body::Dsd(d) => return match d.next(4096) { Ok(Some((l, r))) => { self.good += 1; Next::Pcm(l, r) } Ok(None) => Next::Eof, Err(e) => Next::Err("decode".into(), e) },
+            Body::Sym { format, dec, track_id, tb } => (format, dec, *track_id, *tb),
+        };
+        let pkt = match format.next_packet() {
+            Ok(p) => p,
+            Err(SymErr::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Next::Eof,
+            Err(SymErr::ResetRequired) => { dec.reset(); return Next::Skip; }
+            Err(SymErr::IoError(e)) => return Next::Err("network".into(), e.to_string()),
+            Err(e) => return Next::Err("decode".into(), e.to_string()),
+        };
+        dbg(0, 1);
+        if pkt.track_id() != track_id { dbg(2, 1); return Next::Skip; }
+        let pkt_t = match tb { Some(tb) => { let t = tb.calc_time(pkt.ts()); t.seconds as f64 + t.frac } None => pkt.ts() as f64 / self.sr as f64 };
+        let decoded = match dec.decode(&pkt) {
+            Ok(b) => b,
+            Err(SymErr::DecodeError(e)) => {
+                dbg(1, 1); self.bad += 1;
+                if self.bad <= 3 { eprintln!("[engine] декодер: {e}"); }
+                // поток не декодируется совсем (например, FLAC 32 бит) — пусть играет окно (<audio>)
+                if self.bad >= 24 && self.good == 0 { return Next::Err("unsupported".into(), format!("декодер: {e}")); }
+                return Next::Skip;
+            }
+            Err(e) => return Next::Err("decode".into(), e.to_string()),
+        };
+        self.good += 1;
+        let spec = *decoded.spec();
+        let ch = spec.channels.count().max(1);
+        if spec.rate != 0 && spec.rate != self.sr { self.sr = spec.rate; }
+        let mut sb = SampleBuffer::<f32>::new(decoded.capacity() as u64, spec);
+        sb.copy_interleaved_ref(decoded);
+        let s = sb.samples();
+        let frames = s.len() / ch;
+        let mut from = 0usize;
+        if let Some(until) = self.skip_until {
+            let skip = ((until - pkt_t) * self.sr as f64).round();
+            if skip >= frames as f64 { return Next::Skip; }
+            if skip > 0.0 { from = skip as usize; }
+            self.skip_until = None;
+        }
+        let n = frames - from;
+        let mut l = Vec::with_capacity(n);
+        let mut r = Vec::with_capacity(n);
+        for i in from..frames {
+            let a = s[i * ch];
+            let b = if ch > 1 { s[i * ch + 1] } else { a };
+            l.push(a); r.push(b);
+        }
+        Next::Pcm(l, r)
     }
     fn reset_rs(&mut self) {
         if let Some((rs, _, _, _)) = self.rs.as_mut() { rs.reset(); }
@@ -578,15 +666,7 @@ fn decoder_thread(v: Arc<Voice>, sh: Arc<Shared>, rx: Receiver<Cmd>) {
             }
         }
         if let (Some(t), Some(tr)) = (seek, cur.as_mut()) {
-            let to = SeekTo::Time { time: Time::from(t.max(0.0)), track_id: Some(tr.track_id) };
-            match tr.format.seek(SeekMode::Accurate, to) {
-                Ok(_) => { tr.dec.reset(); tr.reset_rs(); tr.skip_until = Some(t); }
-                Err(e) => {
-                    // перемотка за конец или ошибка формата — встаём в начало, если просили 0, иначе считаем концом
-                    if t < 0.5 { let _ = tr.format.seek(SeekMode::Coarse, SeekTo::Time { time: Time::from(0.0), track_id: Some(tr.track_id) }); tr.dec.reset(); tr.reset_rs(); }
-                    else { eprintln!("[engine] перемотка: {e}"); v.eof.store(true, Ordering::Relaxed); }
-                }
-            }
+            if let Err(e) = tr.seek_to(t) { eprintln!("[engine] перемотка: {e}"); v.eof.store(true, Ordering::Relaxed); }
             // всё, что декодер успел положить до перемотки, — выбрасываем; вывод снова берёт звук с нового места
             v.buf.flush();
             f64_set(&v.base, t.max(0.0));
@@ -598,52 +678,13 @@ fn decoder_thread(v: Arc<Voice>, sh: Arc<Shared>, rx: Receiver<Cmd>) {
         }
         if !busy && seek.is_none() { continue; }
         let Some(tr) = cur.as_mut() else { continue };
-        // один пакет
-        let pkt = match tr.format.next_packet() {
-            Ok(p) => p,
-            Err(SymErr::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => { tr.emit(&v, &[], &[], out_rate, true); v.eof.store(true, Ordering::Relaxed); continue; }
-            Err(SymErr::ResetRequired) => { tr.dec.reset(); continue; }
-            Err(SymErr::IoError(e)) => { set_err(&v, "network", e.to_string()); continue; }
-            Err(e) => { set_err(&v, "decode", e.to_string()); continue; }
-        };
-        dbg(0, 1);
-        if pkt.track_id() != tr.track_id { dbg(2, 1); continue; }
-        let pkt_t = match tr.tb { Some(tb) => { let t = tb.calc_time(pkt.ts()); t.seconds as f64 + t.frac } None => pkt.ts() as f64 / tr.sr as f64 };
-        let decoded = match tr.dec.decode(&pkt) {
-            Ok(b) => b,
-            Err(SymErr::DecodeError(e)) => {
-                dbg(1, 1); tr.bad += 1;
-                if tr.bad <= 3 { eprintln!("[engine] декодер: {e}"); }
-                // поток не декодируется совсем (например, FLAC 32 бит) — пусть играет окно (<audio>)
-                if tr.bad >= 24 && tr.good == 0 { set_err(&v, "unsupported", format!("декодер: {e}")); }
-                continue;
-            }
-            Err(e) => { set_err(&v, "decode", e.to_string()); continue; }
-        };
-        tr.good += 1;
-        let spec = *decoded.spec();
-        let ch = spec.channels.count().max(1);
-        if spec.rate != 0 && spec.rate != tr.sr { tr.sr = spec.rate; }
-        let mut sb = SampleBuffer::<f32>::new(decoded.capacity() as u64, spec);
-        sb.copy_interleaved_ref(decoded);
-        let s = sb.samples();
-        let frames = s.len() / ch;
-        let mut from = 0usize;
-        if let Some(until) = tr.skip_until {
-            let skip = ((until - pkt_t) * tr.sr as f64).round();
-            if skip >= frames as f64 { continue; }
-            if skip > 0.0 { from = skip as usize; }
-            tr.skip_until = None;
+        // один пакет (или кусок DSD)
+        match tr.next_pcm() {
+            Next::Pcm(l, r) => tr.emit(&v, &l, &r, out_rate, false),
+            Next::Skip => {}
+            Next::Eof => { tr.emit(&v, &[], &[], out_rate, true); v.eof.store(true, Ordering::Relaxed); }
+            Next::Err(k, m) => set_err(&v, &k, m),
         }
-        let n = frames - from;
-        let mut l = Vec::with_capacity(n);
-        let mut r = Vec::with_capacity(n);
-        for i in from..frames {
-            let a = s[i * ch];
-            let b = if ch > 1 { s[i * ch + 1] } else { a };
-            l.push(a); r.push(b);
-        }
-        tr.emit(&v, &l, &r, out_rate, false);
     }
 }
 
@@ -945,9 +986,10 @@ mod tests {
                 let (mut t, d) = open_track(&format!("pulsefile://a/{id}")).map_err(|(k, m)| format!("{k}: {m}"))?;
                 let (mut frames, mut errs, mut first) = (0usize, 0usize, String::new());
                 for _ in 0..60 {
-                    let p = match t.format.next_packet() { Ok(p) => p, Err(e) => { if first.is_empty() { first = format!("next_packet: {e}"); } break; } };
-                    if p.track_id() != t.track_id { continue; }
-                    match t.dec.decode(&p) { Ok(b) => frames += b.frames(), Err(e) => { errs += 1; if first.is_empty() { first = format!("decode: {e}"); } } }
+                    let Body::Sym { format, dec, track_id, .. } = &mut t.body else { panic!("не Symphonia") };
+                    let p = match format.next_packet() { Ok(p) => p, Err(e) => { if first.is_empty() { first = format!("next_packet: {e}"); } break; } };
+                    if p.track_id() != *track_id { continue; }
+                    match dec.decode(&p) { Ok(b) => frames += b.frames(), Err(e) => { errs += 1; if first.is_empty() { first = format!("decode: {e}"); } } }
                 }
                 Ok((frames, errs, format!("{first}; длина {d:.2}")))
             })();
@@ -1021,6 +1063,26 @@ mod tests {
         assert!(worst < 8, "в звуке тишина {worst} сэмплов подряд");
         assert!((v.position(48000) - 3.0 - 280.0 * 512.0 / 48000.0).abs() < 0.02, "позиция {}", v.position(48000));
         tx.send(Cmd::Stop).unwrap();
+    }
+
+    // DSD (.dsf) через дорожку движка: длительность, частота PCM, перемотка, конец файла
+    #[test]
+    fn dsd_plays_through_engine_track() {
+        let d = crate::dsd::tests::modulate(2_822_400, 1.0, [1000.0, 1000.0], 0.5);
+        let p = std::env::temp_dir().join(format!("pulse-eng-{}.dsf", std::process::id()));
+        std::fs::write(&p, crate::dsd::tests::dsf(2_822_400, &d)).unwrap();
+        crate::localfile::register("eng-dsd", crate::localfile::Src::File(p.clone()));
+        let (mut t, dur) = open_track("pulsefile://a/eng-dsd").map_err(|(k, m)| format!("{k}: {m}")).unwrap();
+        assert!((dur - 1.0).abs() < 0.01, "длительность {dur}"); assert_eq!(t.sr, 88200);
+        let mut n = 0usize; let mut all = Vec::new();
+        loop { match t.next_pcm() { Next::Pcm(l, _) => { n += l.len(); all.extend(l); } Next::Eof => break, Next::Skip => {} Next::Err(k, m) => panic!("{k}: {m}") } }
+        assert!((n as i64 - 88200).abs() < 50, "кадров {n}");
+        let (a, snr) = crate::dsd::tests::fit(&all[8820..80000], 88200.0, 1000.0);
+        assert!((a - 0.5).abs() < 0.01 && snr > 60.0, "амплитуда {a}, шум {snr}");
+        t.seek_to(0.5).unwrap();
+        let Next::Pcm(l, _) = t.next_pcm() else { panic!("после перемотки нет звука") };
+        assert!((l[100] - all[44100 + 100]).abs() < 1e-3, "перемотка не туда");
+        let _ = std::fs::remove_file(&p);
     }
 
     #[test]

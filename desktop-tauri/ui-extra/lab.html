@@ -63,6 +63,13 @@
 </section>
 
 <section>
+  <h2>DSD: .dsf и .dff</h2>
+  <p class="sub">Выберите DSD-файлы (SACD-рипы, Hi-Res). «Пульс» сам переводит DSD в PCM 88,2 кГц (фильтр с подавлением ≥ 100 дБ, ровно до 24 кГц) и играет через свой звуковой движок. «Сохранить как FLAC / WAV» — PCM 24 бит 88,2 кГц. Своя музыка в Tauri-версии подключается на этапе 6 — до этого DSD проверяем здесь.</p>
+  <div class="row"><button class="acc" id="dsdPick">Выбрать DSD-файлы</button><span id="dsdSt" class="mute"></span></div>
+  <div id="dsdList"></div>
+</section>
+
+<section>
   <h2>Опыт: сколько ещё звучит старое место после перемотки</h2>
   <p class="sub">Тестовый звук, в котором каждая секунда — свой тон (по тону видно, какое место трека сейчас реально звучит). Перематываем и замеряем, через сколько миллисекунд в колонках действительно новое место. Цепочка — как в «Пульсе» (эквалайзер, лимитер). Варианты: как сейчас; другая настройка задержки звука (latencyHint); пауза → перемотка → play. Около минуты, звук — тихие писки.</p>
   <div class="row"><button class="acc" id="runLag">Замерить</button><span id="lagSt" class="mute"></span></div>
@@ -802,6 +809,8 @@
       ].join('\n');
     };
     L.push(''); L.push('— ЭТАП 5: ПЕРЕНОС ДАННЫХ ИЗ ELECTRON'); L.push(mgText(R.mig));
+    L.push(''); L.push('— DSD' + (R.dsd.length ? '' : ': не проверяли'));
+    R.dsd.forEach(function (f) { L.push(f.name + ': ' + (f.info ? f.info.kind + ' ' + f.info.grade + ', ' + f.info.channels + ' кан., ' + fmtT(f.info.duration) : 'не открылся') + '; играл: ' + (f.played ? 'да' : '—') + (f.err ? '; ошибка: ' + f.err : '') + (f.flac ? '; FLAC: ' + f.flac : '') + (f.wav ? '; WAV: ' + f.wav : '')); });
     var E = R.engine; L.push(''); L.push('— ЗВУКОВОЙ ДВИЖОК: СБОИ С ЗАПУСКА' + (E ? '' : ': нет данных (' + (R.engineErr || 'движок не запущен') + ')'));
     if (E) {
       L.push('Вывод: ' + (E.device || '—') + ', ' + E.rate + ' Гц, кусок ' + E.cb_frames + ' кадров, самый долгий расчёт ' + E.cb_max_ms + ' мс, запас ' + E.ahead_s + ' с');
@@ -838,6 +847,55 @@
     L.push(''); L.push('— ЖУРНАЛ'); L.push(R.logs.join('\n'));
     return L.join('\n');
   }
+  // ——— DSD
+  R.dsd = [];
+  var dsdVoice = 0, dsdNow = null, dsdTimer = 0;
+  function fmtT(t) { t = Math.max(0, Math.floor(t || 0)); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); }
+  async function dsdPlay(f, row) {
+    try {
+      if (!dsdVoice) dsdVoice = await invoke('engine_create');
+      if (dsdNow !== f.id) { await invoke('engine_open', { v: dsdVoice, url: f.url, start: 0 }); dsdNow = f.id; }
+      await invoke('engine_play', { v: dsdVoice }); f.played = true;
+      clearInterval(dsdTimer);
+      dsdTimer = setInterval(async function () {
+        var s = await invoke('engine_state', { v: dsdVoice }).catch(function () { return null; }); if (!s) return;
+        row.querySelector('.dpos').textContent = fmtT(s.t) + ' / ' + fmtT(s.d) + (s.error ? ' — ошибка: ' + s.error : '') + (s.waiting ? ' (загрузка)' : '');
+        var sl = row.querySelector('input'); if (!sl._drag && s.d > 0) sl.value = String(Math.round(s.t / s.d * 1000));
+        if (s.error) f.err = s.error;
+      }, 250);
+    } catch (e) { row.querySelector('.dpos').textContent = 'Ошибка: ' + e; f.err = String(e); }
+  }
+  $('dsdPick').onclick = async function () {
+    var list = await invoke('pick_files').catch(function (e) { $('dsdSt').textContent = 'Ошибка: ' + e; return []; });
+    list = list.filter(function (f) { return /\.(dsf|dff)$/i.test(f.name); });
+    if (!list.length) { $('dsdSt').textContent = 'DSD-файлов (.dsf, .dff) не выбрано'; return; }
+    $('dsdSt').textContent = '';
+    for (const f of list) {
+      var row = document.createElement('div'); row.className = 'log'; row.style.marginTop = '10px';
+      row.innerHTML = '<b></b> <span class="dinfo mute"></span><div class="row" style="margin-top:8px"><button class="acc dp">Играть</button><button class="dpa">Пауза</button><input type="range" min="0" max="1000" value="0" style="flex:1;min-width:200px"><span class="dpos mute"></span></div><div class="row"><button class="dflac">Сохранить как FLAC</button><button class="dwav">Сохранить как WAV</button><span class="dconv mute"></span></div>';
+      row.querySelector('b').textContent = f.name; $('dsdList').appendChild(row);
+      try { f.info = await invoke('dsd_info', { id: f.id }); row.querySelector('.dinfo').textContent = f.info.kind + ' · ' + f.info.grade + ' (' + (f.info.fs / 1e6).toFixed(4) + ' МГц) · ' + f.info.channels + ' кан. · ' + fmtT(f.info.duration) + ' → PCM ' + (f.info.outRate / 1000) + ' кГц'; }
+      catch (e) { f.err = String(e); row.querySelector('.dinfo').textContent = 'Не открылся: ' + e; }
+      R.dsd.push(f);
+      (function (f, row) {
+        row.querySelector('.dp').onclick = function () { dsdPlay(f, row); };
+        row.querySelector('.dpa').onclick = function () { if (dsdVoice) invoke('engine_pause', { v: dsdVoice }); };
+        var sl = row.querySelector('input');
+        sl.oninput = function () { sl._drag = true; };
+        sl.onchange = async function () { sl._drag = false; if (dsdNow !== f.id) await dsdPlay(f, row); if (f.info) invoke('engine_seek', { v: dsdVoice, t: sl.value / 1000 * f.info.duration }); };
+        var conv = async function (fmt) {
+          var st = row.querySelector('.dconv'); st.textContent = 'Сохраняю…'; var t0 = performance.now();
+          var un = await window.__TAURI__.event.listen('pulse-dsd', function (e) { if (e.payload && e.payload.id === f.id) st.textContent = 'Сохраняю… ' + Math.round(e.payload.p * 100) + ' %'; });
+          try { var p = await invoke('dsd_convert', { id: f.id, fmt: fmt }); st.textContent = p ? 'Готово за ' + ((performance.now() - t0) / 1000).toFixed(1) + ' с: ' + p : 'Отменено'; f[fmt] = p ? 'да, ' + ((performance.now() - t0) / 1000).toFixed(1) + ' с' : 'отменено'; }
+          catch (e) { st.textContent = 'Ошибка: ' + e; f[fmt] = 'ОШИБКА ' + e; }
+          un();
+        };
+        row.querySelector('.dflac').onclick = function () { conv('flac'); };
+        row.querySelector('.dwav').onclick = function () { conv('wav'); };
+      })(f, row);
+    }
+  };
+
   // ——— этап 5: перенос данных
   var MG_ST = { 'none': 'ещё не было', 'no-electron': 'данных Electron на этом компьютере нет', 'pending': 'данные готовы — откройте «Пульс», чтобы они записались', 'applied': 'перенесено и проверено', 'applied-with-errors': 'перенесено, но с ошибками (см. ниже)', 'restore-pending': 'возврат готов — откройте «Пульс»', 'restored': 'возвращено, как было до переноса', 'error': 'ошибка' };
   function mgText(m) {

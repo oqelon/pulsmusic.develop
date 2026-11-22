@@ -11,7 +11,9 @@
 // CD, Discord, обновления (этап 6). Данные этой сборки хранятся отдельно (ru.pulse.desktop.tauritest) — обычный
 // «Пульс» на Electron, его настройки, лайки и токен она не видит и не трогает.
 
+mod dsd;
 mod engine;
+mod flacw;
 mod lab;
 mod ldb;
 mod localfile;
@@ -33,7 +35,7 @@ use tauri_plugin_dialog::DialogExt;
 const KEY_SERVICE: &str = "ru.pulse.desktop.tauritest";
 const KEY_USER: &str = "yandex-token";
 const CHUNK: u64 = 4 * 1024 * 1024;
-const AUDIO_EXT: &[&str] = &["flac", "mp3", "m4a", "m4b", "aac", "mp4", "ogg", "oga", "opus", "webm", "weba", "wav", "aif", "aiff", "alac", "caf", "wv", "ape"];
+const AUDIO_EXT: &[&str] = &["flac", "mp3", "m4a", "m4b", "aac", "mp4", "ogg", "oga", "opus", "webm", "weba", "wav", "aif", "aiff", "alac", "caf", "wv", "ape", "dsf", "dff"];
 
 static PICK_SEQ: AtomicU64 = AtomicU64::new(1);
 
@@ -315,6 +317,37 @@ fn social_set(app: tauri::AppHandle, patch: serde_json::Value) -> Result<bool, S
     migrate::social_write(&app, &cur).map(|_| true)
 }
 
+// ——— DSD (dsd.rs): сведения о файле и «Сохранить как FLAC/WAV» (PCM 24 бит) ———
+fn dsd_open(id: &str) -> Result<dsd::Reader, String> {
+    let src = localfile::get(id).ok_or("файл больше не в списке")?;
+    let o = localfile::Opened::open(&src).map_err(|e| e.to_string())?;
+    dsd::Reader::open(Box::new(localfile::Reader::new(o)))
+}
+#[tauri::command]
+fn dsd_info(id: String) -> Result<serde_json::Value, String> {
+    let r = dsd_open(&id)?; let i = &r.info;
+    Ok(serde_json::json!({ "kind": i.kind, "grade": i.grade(), "fs": i.fs, "channels": i.channels, "duration": i.duration(), "outRate": i.out_rate }))
+}
+#[tauri::command]
+async fn dsd_convert(app: tauri::AppHandle, id: String, fmt: String) -> Result<Option<String>, String> {
+    let fmt = if fmt == "wav" { "wav" } else { "flac" };
+    let name = match localfile::get(&id) { Some(localfile::Src::File(p)) => p.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "DSD".into()), _ => "DSD".into() };
+    let Some(fp) = app.dialog().file().set_title(if fmt == "wav" { "Сохранить как WAV (24 бит)" } else { "Сохранить как FLAC (24 бит)" }).set_file_name(format!("{name}.{fmt}")).add_filter(fmt.to_uppercase(), &[fmt]).blocking_save_file() else { return Ok(None) };
+    let out = fp.into_path().map_err(|e| e.to_string())?;
+    let (a, o2, id2) = (app.clone(), out.clone(), id.clone());
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let mut r = dsd_open(&id2)?;
+        let tmp = o2.with_extension(format!("{fmt}.part"));
+        let mut f = std::io::BufWriter::new(std::fs::File::create(&tmp).map_err(|e| e.to_string())?);
+        let mut last = 0.0f64;
+        let mut prog = |p: f64| { if p - last >= 0.01 || p >= 1.0 { last = p; let _ = tauri::Emitter::emit(&a, "pulse-dsd", serde_json::json!({ "id": id2, "p": p.min(1.0) })); } };
+        let res = if fmt == "wav" { dsd::to_wav(&mut r, &mut f, &mut prog) } else { dsd::to_flac(&mut r, &mut f, &mut prog) };
+        drop(f);
+        match res { Ok(_) => std::fs::rename(&tmp, &o2).map_err(|e| e.to_string()), Err(e) => { let _ = std::fs::remove_file(&tmp); Err(e) } }
+    }).await.map_err(|e| e.to_string())??;
+    Ok(Some(out.display().to_string()))
+}
+
 // ——— PULSE Audio Engine: команды окна (см. engine.rs) ———
 fn eng() -> Result<&'static engine::Engine, String> { engine::get().ok_or_else(|| "движок не запущен".to_string()) }
 #[tauri::command] fn engine_create() -> Result<u32, String> { Ok(eng()?.create()) }
@@ -368,7 +401,7 @@ pub fn run() {
                 responder.respond(r);
             });
         })
-        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams, lab_ya_log, lab_ya_log_last, lab_ya_recent, lab_nav_log, migrate_status, migrate_applied, migrate_restored, migrate_rerun, migrate_restore, social_get, social_set, ya_add, token_set, ya_login, engine_create, engine_drop, engine_open, engine_play, engine_pause, engine_seek, engine_volume, engine_rate, engine_state, engine_eq, engine_tap, engine_info, engine_stats, engine_devices, engine_set_device])
+        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams, lab_ya_log, lab_ya_log_last, lab_ya_recent, lab_nav_log, dsd_info, dsd_convert, migrate_status, migrate_applied, migrate_restored, migrate_rerun, migrate_restore, social_get, social_set, ya_add, token_set, ya_login, engine_create, engine_drop, engine_open, engine_play, engine_pause, engine_seek, engine_volume, engine_rate, engine_state, engine_eq, engine_tap, engine_info, engine_stats, engine_devices, engine_set_device])
         .run(tauri::generate_context!())
         .expect("не удалось запустить Пульс (Tauri)");
 }
