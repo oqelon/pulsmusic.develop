@@ -34,9 +34,15 @@ pub fn audio_codec(ext: &str) -> Option<&'static str> {
 fn is_img(name: &str) -> bool { let l = name.to_lowercase(); [".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"].iter().any(|e| l.ends_with(e)) }
 fn ext_of(p: &str) -> String { let b = p.rsplit(['/', '\\']).next().unwrap_or(p); match b.rfind('.') { Some(i) if i > 0 => b[i + 1..].to_lowercase(), _ => String::new() } }
 fn base(p: &str) -> &str { p.trim_end_matches(['/', '\\']).rsplit(['/', '\\']).next().unwrap_or(p) }
-fn dirname(p: &str) -> String { let t = p.trim_end_matches(['/', '\\']); match t.rfind(['/', '\\']) { Some(0) => "/".into(), Some(i) => t[..i].to_string(), None => ".".into() } }
+fn dirname(p: &str) -> String {
+    let t = p.trim_end_matches(['/', '\\']);
+    match t.rfind(['/', '\\']) { Some(0) => "/".into(), Some(i) if cfg!(windows) && t[..i].ends_with(':') => format!("{}\\", &t[..i]), Some(i) => t[..i].to_string(), None => ".".into() }
+}
+/// разделитель папок, как у path.join в Electron-версии: от него зависит номер трека (отпечаток пути) — и лайки своих треков
+pub const SEP: char = if cfg!(windows) { '\\' } else { '/' };
+fn sep_fix(n: &str) -> String { n.replace(['/', '\\'], &SEP.to_string()) }
 fn stem(p: &str) -> String { let b = base(p); match b.rfind('.') { Some(i) if i > 0 => b[..i].to_string(), _ => b.to_string() } }
-fn join(d: &str, n: &str) -> String { if d.ends_with('/') { format!("{d}{n}") } else { format!("{d}/{n}") } }
+fn join(d: &str, n: &str) -> String { if d.ends_with(['/', '\\']) { format!("{d}{n}") } else { format!("{d}{SEP}{n}") } }
 
 // ——— SHA-1 (номера файлов те же, что у Electron: sha1(путь в нижнем регистре)[..16]) ———
 pub fn sha1_hex(data: &[u8]) -> String {
@@ -700,9 +706,11 @@ impl Lib {
         let mut roots = self.roots(); let mut n = 0;
         for p0 in paths {
             if p0.is_empty() || !Path::new(p0).is_absolute() || !Path::new(p0).exists() { continue; }
-            let p = p0.trim_end_matches('/').to_string(); let p = if p.is_empty() { "/".to_string() } else { p };
-            if roots.iter().any(|r| p == *r || p.starts_with(&format!("{r}/"))) { continue; }
-            roots.retain(|r| !r.starts_with(&format!("{p}/"))); roots.push(p); n += 1;
+            let p = p0.trim_end_matches(['/', '\\']).to_string();
+            let p = if p.is_empty() { "/".to_string() } else if cfg!(windows) && p.ends_with(':') { format!("{p}\\") } else { p };
+            let under = |a: &str, b: &str| a.len() > b.len() && a.starts_with(b) && (b.ends_with(SEP) || a[b.len()..].starts_with(SEP));
+            if roots.iter().any(|r| p == *r || under(&p, r)) { continue; }
+            roots.retain(|r| !under(r, &p)); roots.push(p); n += 1;
         }
         self.v["roots"] = json!(roots); n
     }
@@ -760,7 +768,7 @@ impl Lib {
             let mut cue = parse_cue(&text_auto(&b)); let dir = dirname(&cp);
             for f in cue.files.iter_mut() {
                 let l = f.name.to_lowercase(); if !(l.ends_with(".bin") || l.ends_with(".img")) || f.kind == "MOTOROLA" { continue; }
-                let want = join(&dir, &f.name.replace('\\', "/")).to_lowercase();
+                let want = join(&dir, &sep_fix(&f.name)).to_lowercase();
                 let Some(b) = all.iter().find(|y| y.p.to_lowercase() == want) else { continue };
                 let vp = format!("{}{VSEP}audio-cd.wav", b.p); f.resolved = Some(vp.clone());
                 if !vfs.contains_key(&vp) { vfs.insert(vp.clone(), json!({ "src": b.p, "off": 0, "size": b.s - b.s % 4, "wav": true })); if !hid.contains(&vp) { extra.push(Ent { p: vp, m: b.m, s: b.s, vd: None }); } }
@@ -865,7 +873,7 @@ impl Lib {
 }
 
 fn resolve_cue_file(dir: &str, name: &str, siblings: &[String]) -> Option<String> {
-    let want = join(dir, &name.replace('\\', "/"));
+    let want = join(dir, &sep_fix(name));
     let low: HashMap<String, &String> = siblings.iter().map(|p| (p.to_lowercase(), p)).collect();
     if let Some(p) = low.get(&want.to_lowercase()) { return Some((*p).clone()); }
     let b = join(dir, &stem(name)).to_lowercase();
