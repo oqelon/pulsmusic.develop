@@ -29,6 +29,9 @@ jobs:
           workspaces: desktop-tauri/src-tauri -> target
       - name: Интерфейс 0.38.0 + лаборатория
         run: bash desktop-tauri/prepare-ui.sh 0.38.0
+      - name: Проверки Rust (cargo test)
+        working-directory: desktop-tauri/src-tauri
+        run: cargo test --release --target aarch64-apple-darwin -- --test-threads=4
       - name: Сборка
         working-directory: desktop-tauri
         env:
@@ -56,7 +59,7 @@ jobs:
           ТЕСТОВАЯ сборка «Пульса» на Tauri 2 — только для проверки звука на Mac (Apple Silicon). Не для обычного использования.
 
           • Ставится отдельно от обычного «Пульса» и его данные (лайки, плейлисты, токен) не видит и не меняет.
-          • Внутри: «Лаборатория звука» и интерфейс 0.38.0 с демо-треками (без Яндекса).
+          • Внутри: «Лаборатория звука» (этапы 2–3: звук WebKit, отдача звука через Rust) и интерфейс 0.38.0 с демо-треками (без настоящего Яндекса).
           • Программа не подписана Apple: первый запуск — правый клик → «Открыть», либо в Терминале: xattr -cr "/Applications/Pulse Tauri Test.app"
           • Размер программы: ${{ steps.pk.outputs.app_mb }} МБ. Коммит ${{ github.sha }}.
           EOF

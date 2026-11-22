@@ -1,7 +1,7 @@
 [package]
 name = "pulse-tauri"
 version = "0.38.0"
-description = "Пульс — тестовая сборка на Tauri 2 (этап 2 миграции: проверка совместимости звука на macOS)"
+description = "Пульс — тестовая сборка на Tauri 2 (этапы 2–3 миграции: звук на macOS)"
 edition = "2021"
 publish = false
 
@@ -17,6 +17,11 @@ tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# этап 3: звук Яндекса (запрос к серверу, расшифровка AES-CTR)
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "http2"] }
+aes = "0.8"
+ctr = "0.9"
+getrandom = "0.2"
 
 [profile.release]
 codegen-units = 1

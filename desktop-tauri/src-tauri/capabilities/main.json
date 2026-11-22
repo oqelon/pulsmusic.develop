@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "Окно интерфейса «Пульса» в тестовой сборке: единственная команда — формат играющего трека Яндекса.",
+  "windows": ["main"],
+  "permissions": ["allow-player"]
+}

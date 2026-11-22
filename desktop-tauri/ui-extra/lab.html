@@ -49,15 +49,24 @@
 <div class="hero">
   <div>
     <h1>Проверка звука на Tauri</h1>
-    <p class="sub">Тестовая сборка «Пульса». Ваш обычный «Пульс», его лайки, плейлисты и токен она не видит и не меняет.</p>
+    <p class="sub">Тестовая сборка «Пульса», этапы 2–3. Ваш обычный «Пульс», его лайки, плейлисты и токен она не видит и не меняет.</p>
     <div class="env" id="env">…</div>
   </div>
   <button class="acc" id="openUi">Открыть интерфейс «Пульса» (демо-треки)</button>
 </div>
 
 <section>
+  <h2>Этап 3. Звук «Пульса» через Rust</h2>
+  <p class="sub">Так «Пульс» будет получать звук: потоки Яндекса (в том числе зашифрованный FLAC, который программа расшифровывает на лету) и свои файлы с диска отдаёт часть программы на Rust. Яндекс здесь подменён маленьким сервером внутри программы — без интернета и без токена. Займёт около минуты.</p>
+  <div class="row"><button class="acc" id="runRust">Проверить</button><span id="rustSt" class="mute"></span></div>
+  <table id="rtbl"><thead><tr>
+    <th>Источник</th><th>Обещает</th><th>Открылся</th><th>Играет</th><th>Перемотка 50% / 90%</th><th>Через эквалайзер</th><th>Кусками</th><th>Раскодирует</th><th title="Все байты, полученные через программу, совпали с исходным файлом (подряд и с 6 случайных мест)">Байт в байт</th><th title="Частота и разрядность, которые программа узнала из звука">Формат</th>
+  </tr></thead><tbody></tbody></table>
+</section>
+
+<section>
   <h2>1. Форматы</h2>
-  <p class="sub">14 файлов по 10 секунд. Каждый тихо проиграется около 4 секунд с перемоткой — наденьте наушники или убавьте громкость. Займёт около двух минут.</p>
+  <p class="sub">15 файлов по 10 секунд. Каждый тихо проиграется около 4 секунд с перемоткой — наденьте наушники или убавьте громкость. Займёт около двух минут.</p>
   <div class="row"><button class="acc" id="runAll">Проверить все форматы</button><span id="runSt" class="mute"></span></div>
   <table id="tbl"><thead><tr>
     <th>Файл</th><th title="canPlayType: что движок обещает">Обещает</th><th>Открылся</th><th>Играет</th><th>Перемотка 50% / 90%</th><th title="Звук проходит через Web Audio — нужно для эквалайзера, лимитера и живого фона">Через эквалайзер</th><th title="Схема pulsetest:// отдаёт кусок файла по запросу Range">Кусками</th><th title="Web Audio может сам раскодировать файл (запасной путь)">Раскодирует</th>
@@ -119,7 +128,7 @@
   var $ = function (id) { return document.getElementById(id); };
   var sleep = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
   var started = new Date();
-  var R = { env: null, sys: {}, formats: [], user: [], eq: null, vol: null, xf: null, sink: null, bg: null, keys: [], manual: {}, logs: [] };
+  var R = { env: null, sys: {}, rust: [], formats: [], user: [], eq: null, vol: null, xf: null, sink: null, bg: null, keys: [], manual: {}, logs: [] };
 
   var FILES = [
     ['flac-16-44.flac', 'audio/flac', 'FLAC 16/44,1'],
@@ -135,7 +144,8 @@
     ['webm-vorbis.webm', 'audio/webm; codecs="vorbis"', 'Vorbis в WebM'],
     ['wav-16-44.wav', 'audio/wav', 'WAV 16/44,1'],
     ['wav-24-96.wav', 'audio/wav', 'WAV 24/96'],
-    ['wavpack.wv', 'audio/x-wavpack', 'WavPack (не поддерживался и в Electron)'],
+    ['aiff-16-44.aif', 'audio/aiff', 'AIFF 16/44,1'],
+    ['wavpack.wv', 'audio/x-wavpack', 'WavPack (в «Пульсе» его раскодирует сама программа)'],
   ];
   var MIME = { flac: 'audio/flac', mp3: 'audio/mpeg', m4a: 'audio/mp4', m4b: 'audio/mp4', aac: 'audio/mp4', mp4: 'audio/mp4', alac: 'audio/mp4', ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg; codecs="opus"', webm: 'audio/webm', weba: 'audio/webm', wav: 'audio/wav', aif: 'audio/aiff', aiff: 'audio/aiff', caf: 'audio/x-caf', wv: 'audio/x-wavpack', ape: 'audio/x-ape' };
 
@@ -206,7 +216,7 @@
     } catch (e) { r.range = { ok: false, err: e.message }; }
     // Web Audio раскодирует сам?
     try {
-      var buf = await (await fetch(url)).arrayBuffer();
+      var buf = /^(pulsetest:|http:\/\/pulsetest\.)/.test(url) ? await (await fetch(url)).arrayBuffer() : (await fetchAll(url, 80 * 1024 * 1024)).buffer;
       if (buf.byteLength > 80 * 1024 * 1024) r.decode = { ok: null, err: 'файл больше 80 МБ — пропущено' };
       else {
         var ab = await new Promise(function (res, rej) { var p = c.decodeAudioData(buf, res, rej); if (p && p.then) p.then(res, rej); });
@@ -247,6 +257,70 @@
     }
     var good = R.formats.filter(function (r) { return r.play && r.play.ok; }).length;
     $('runSt').textContent = 'Готово: играют ' + good + ' из ' + FILES.length + '. Наведите на значок — будет подробность.';
+    btn.disabled = false;
+  };
+
+  // ——— этап 3: звук через Rust
+  var YA = WIN ? 'http://pulseya.localhost/s/' : 'pulseya://s/';
+  var PF = WIN ? 'http://pulsefile.localhost/' : 'pulsefile://';
+  var CODEC_MIME = { 'flac-mp4': 'audio/mp4; codecs="flac"', 'aac-mp4': 'audio/mp4; codecs="mp4a.40.2"', mp3: 'audio/mpeg' };
+  // всё содержимое адреса по кускам (как читает плеер)
+  async function fetchAll(url, max) {
+    var parts = [], pos = 0, total = null, guard = 0;
+    while (guard++ < 400) {
+      if (max && pos > max) throw new Error('файл больше 80 МБ — пропущено');
+      var r = await fetch(url, { headers: { Range: 'bytes=' + pos + '-' } });
+      if (r.status === 416) break;
+      if (r.status !== 200 && r.status !== 206) throw new Error('HTTP ' + r.status + ' на ' + pos);
+      var b = new Uint8Array(await r.arrayBuffer());
+      var cr = r.headers.get('content-range'); if (cr) total = +cr.split('/')[1];
+      parts.push(b); pos += b.length;
+      if (r.status === 200 || !b.length || (total != null && pos >= total)) break;
+    }
+    var out = new Uint8Array(pos), o = 0; parts.forEach(function (p) { out.set(p, o); o += p.length; });
+    return out;
+  }
+  async function fetchPart(url, a, b) { var r = await fetch(url, { headers: { Range: 'bytes=' + a + '-' + b } }); return new Uint8Array(await r.arrayBuffer()); }
+  function same(x, y, off) { for (var i = 0; i < x.length; i++) if (x[i] !== y[off + i]) return false; return true; }
+  async function byteCheck(url, plainUrl) {
+    try {
+      var p = await fetchAll(plainUrl), g = await fetchAll(url);
+      if (g.length !== p.length) return { ok: false, err: 'длина ' + g.length + ' вместо ' + p.length };
+      if (!same(g, p, 0)) return { ok: false, err: 'подряд — байты не совпали' };
+      for (var k = 0; k < 6; k++) {
+        var a = Math.floor(Math.random() * (p.length - 70000)), b = a + 1 + Math.floor(Math.random() * 65000);
+        var part = await fetchPart(url, a, b);
+        if (part.length !== b - a + 1 || !same(part, p, a)) return { ok: false, err: 'кусок ' + a + '–' + b + ' не совпал' };
+      }
+      return { ok: true, bytes: p.length };
+    } catch (e) { return { ok: false, err: e.message }; }
+  }
+  $('runRust').onclick = async function () {
+    var btn = this; btn.disabled = true; getCtx(); R.rust = [];
+    var tb = document.querySelector('#rtbl tbody'); tb.innerHTML = '';
+    var list = [];
+    try { (await invoke('lab_streams')).forEach(function (s) { list.push({ name: s.name, url: YA + s.id, mime: CODEC_MIME[s.id === 'lab-aac' ? 'aac-mp4' : s.id === 'lab-mp3' ? 'mp3' : 'flac-mp4'], plain: s.plain, ya: true }); }); }
+    catch (e) { $('rustSt').textContent = 'Нет связи с программой: ' + e; btn.disabled = false; return; }
+    list.push({ name: 'Свой файл FLAC 24/96 (pulsefile://)', url: PF + 'a/lab-flac', mime: 'audio/flac', plain: 'flac-24-96.flac' });
+    list.push({ name: 'Образ аудио-CD → WAV (pulsefile://)', url: PF + 'a/lab-cd', mime: 'audio/wav', plain: null });
+    list.push({ name: 'AIFF (pulsefile://)', url: PF + 'a/lab-aiff', mime: 'audio/aiff', plain: 'aiff-16-44.aif' });
+    list.push({ name: 'WebM Opus (pulsefile://) — известная тишина через эквалайзер', url: PF + 'a/lab-webm', mime: 'audio/webm; codecs="opus"', plain: 'webm-opus.webm' });
+    for (var i = 0; i < list.length; i++) {
+      var it = list[i]; $('rustSt').textContent = (i + 1) + ' из ' + (list.length + 1) + ': ' + it.name;
+      var tr = document.createElement('tr'); tr.innerHTML = '<td>' + it.name + '</td><td colspan="9" class="mute">проверяю…</td>'; tb.appendChild(tr);
+      var r = await testOne(it.url, it.mime); r.name = it.name;
+      r.bytes = it.plain ? await byteCheck(it.url, BASE + '/test/' + it.plain) : null;
+      if (it.ya) { try { r.fmt = await invoke('ya_fmt', { url: it.url }); } catch (e) { r.fmt = null; } }
+      R.rust.push(r);
+      var fm = r.fmt ? r.fmt.codec + (r.fmt.bits ? ' ' + r.fmt.bits + ' бит' : '') + ' · ' + (r.fmt.sr / 1000) + ' кГц' : (it.ya ? '<span class="bad">не узнал</span>' : '—');
+      tr.innerHTML = rowHtml(it.name, r, '<td class="c">' + mark(r.bytes ? r.bytes.ok : null, r.bytes ? (r.bytes.err || r.bytes.bytes + ' байт') : 'сверять не с чем') + '</td><td class="c">' + fm + '</td>');
+    }
+    // обложка своего файла
+    var cov = await new Promise(function (res) { var im = new Image(); im.onload = function () { res({ ok: im.naturalWidth === 400, w: im.naturalWidth }); }; im.onerror = function () { res({ ok: false }); }; im.src = PF + 'c/lab-cover'; setTimeout(function () { res({ ok: false, err: 'нет ответа' }); }, 5000); });
+    R.rustCover = cov;
+    var tr2 = document.createElement('tr'); tr2.innerHTML = '<td>Обложка своего файла (pulsefile://c/)</td><td colspan="9">' + mark(cov.ok, cov.w ? cov.w + ' px' : (cov.err || 'не загрузилась')) + '</td>'; tb.appendChild(tr2);
+    var good = R.rust.filter(function (r) { return r.play && r.play.ok && (!r.bytes || r.bytes.ok); }).length;
+    $('rustSt').textContent = 'Готово: ' + good + ' из ' + R.rust.length + ' играют и совпадают байт в байт. Наведите на значок — будет подробность.';
     btn.disabled = false;
   };
 
@@ -410,7 +484,7 @@
         var f = list[i], ext = (f.name.split('.').pop() || '').toLowerCase(), mime = MIME[ext] || 'audio/' + ext;
         $('pickSt').textContent = (i + 1) + ' из ' + list.length + ': ' + f.name;
         var tr = document.createElement('tr'); tr.innerHTML = '<td>' + esc(f.name) + '</td><td colspan="8" class="mute">проверяю…</td>'; tb.appendChild(tr);
-        var url = BASE + '/u/' + f.id;
+        var url = f.url;
         var r = await testOne(url, mime); r.name = f.name; r.ext = ext; r.size = f.size; R.user.push(r);
         tr.innerHTML = rowHtml(esc(f.name) + ' <span class="pill">' + (f.size / 1048576).toFixed(1) + ' МБ</span>', r, '<td><button class="sm" data-u="' + url + '">Слушать</button></td>');
       }
@@ -426,6 +500,10 @@
 
   // ——— ручная проверка
   var MAN = [
+    ['r_ya', 'Этап 3: «Яндекс-потоки» в интерфейсе «Пульса» играют', 'Первые треки в чарте: FLAC 16/44, FLAC 24/96, AAC, MP3, запасная ссылка'],
+    ['r_q', 'Этап 3: у «Яндекс-потока FLAC 24/96» качество показано как 24 бит · 96 кГц', 'Подпись качества в мини-плеере'],
+    ['r_seek', 'Этап 3: перемотка, эквалайзер и плавный переход на «Яндекс-потоках»', ''],
+    ['r_file', 'Этап 3: «Свой файл» FLAC, образ CD и AIFF играют в интерфейсе', ''],
     ['lab', 'В этом окне звук слышно', 'Проверка форматов и кроссфейд'],
     ['ui', 'Интерфейс «Пульса» открывается и выглядит как обычно', 'Кнопка вверху справа. Шрифты, цвета, отступы, анимации'],
     ['ui_play', 'Демо-треки играют в интерфейсе', 'Каждый трек — свой формат (название = формат)'],
@@ -486,6 +564,9 @@
           '; раскодирует: ' + (r.decode ? (r.decode.ok ? 'да, ' + r.decode.sr + ' Гц' : 'НЕТ ' + (r.decode.err || '')) : '—'),
       ].join('\n');
     };
+    L.push(''); L.push('— ЭТАП 3: ЗВУК ЧЕРЕЗ RUST' + (R.rust.length ? '' : ': не проверяли'));
+    R.rust.forEach(function (r) { L.push(fmt(r) + '\n   байт в байт: ' + (r.bytes ? (r.bytes.ok ? 'да (' + r.bytes.bytes + ' байт)' : 'НЕТ ' + r.bytes.err) : '—') + (r.fmt !== undefined ? '; формат: ' + (r.fmt ? r.fmt.codec + ' ' + r.fmt.bits + ' бит ' + r.fmt.sr + ' Гц' : 'НЕ узнал') : '')); });
+    if (R.rustCover) L.push('Обложка своего файла: ' + yn(R.rustCover.ok));
     L.push(''); L.push('— ТЕСТОВЫЕ ФОРМАТЫ' + (R.formats.length ? '' : ': не проверяли'));
     R.formats.forEach(function (r) { L.push(fmt(r)); });
     L.push(''); L.push('— ВАШИ ФАЙЛЫ' + (R.user.length ? '' : ': не выбирали'));

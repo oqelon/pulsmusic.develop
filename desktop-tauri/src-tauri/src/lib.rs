@@ -1,155 +1,85 @@
-// Пульс на Tauri 2 — ТЕСТОВАЯ сборка этапа 2 миграции (проверка совместимости звука на macOS).
+// Пульс на Tauri 2 — ТЕСТОВАЯ сборка (миграция с Electron).
 //
-// Что здесь есть:
-//  • окно «Лаборатория звука» (lab.html) — автоматические и ручные проверки воспроизведения;
-//  • своя схема pulsetest:// — отдаёт тестовые файлы и выбранные вами файлы по кускам (Range), как в «Пульсе»
-//    это делают pulsefile:// и pulseya://. Так проверяется главный риск: играет ли WKWebView звук со своей схемы;
-//  • окно «Пульс» — настоящий интерфейс 0.38.0 без изменений, с подставными (демо) данными вместо Яндекса.
+// Этап 2: окно «Лаборатория звука» и схема pulsetest:// (тестовые файлы) — проверка звука WebKit на macOS.
+// Этап 3: звук «Пульса» отдаёт Rust, а не Node:
+//  • pulseya://s/<id>  — звук Яндекса: запрос к серверу кусками, расшифровка FLAC (AES-CTR) на лету (yastream.rs);
+//  • pulsefile://a/<id> и pulsefile://c/<id> — свои файлы и обложки, в том числе кусок образа диска как WAV (localfile.rs).
+// Окно «Пульс» — интерфейс 0.38.0 без изменений, с демо-треками (часть из них играет через pulseya:// и pulsefile://).
 //
-// Чего здесь нет (сознательно, это следующие этапы): Яндекс, вход, свои папки, Discord, запись CD, обновления.
-// Данные этой сборки хранятся отдельно (идентификатор ru.pulse.desktop.tauritest) — установленный «Пульс»
-// на Electron, его настройки, лайки и токен она не видит и не трогает.
+// Чего здесь ещё нет (следующие этапы): Яндекс API и вход (этап 4), перенос данных (этап 5), разбор своих папок,
+// CD, Discord, обновления (этап 6). Данные этой сборки хранятся отдельно (ru.pulse.desktop.tauritest) — обычный
+// «Пульс» на Electron, его настройки, лайки и токен она не видит и не трогает.
 
-use std::collections::HashMap;
+mod lab;
+mod localfile;
+mod resp;
+mod yastream;
+
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
 
 use tauri::http::{header, Response, StatusCode};
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
 
-// подставной window.pulse для окна интерфейса (демо-треки играют тестовые файлы через pulsetest://)
+// подставной window.pulse для окна интерфейса (демо-треки)
 const DEMO_BRIDGE: &str = include_str!("../../ui-extra/demo-bridge.js");
-// за один ответ — не больше 4 МБ (плеер сам попросит следующий кусок)
 const CHUNK: u64 = 4 * 1024 * 1024;
-// без Range целиком отдаём только небольшие файлы
-const WHOLE_MAX: u64 = 64 * 1024 * 1024;
 const AUDIO_EXT: &[&str] = &["flac", "mp3", "m4a", "m4b", "aac", "mp4", "ogg", "oga", "opus", "webm", "weba", "wav", "aif", "aiff", "alac", "caf", "wv", "ape"];
 
-#[derive(Default)]
-struct Picked {
-    files: Mutex<HashMap<String, PathBuf>>,
-    seq: AtomicU64,
-}
-
-fn mime_of(p: &str) -> &'static str {
-    let ext = p.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
-    match ext.as_str() {
-        "flac" => "audio/flac",
-        "mp3" => "audio/mpeg",
-        "m4a" | "m4b" | "mp4" | "aac" | "alac" => "audio/mp4",
-        "ogg" | "oga" => "audio/ogg",
-        "opus" => "audio/ogg; codecs=opus",
-        "webm" | "weba" => "audio/webm",
-        "wav" => "audio/wav",
-        "aif" | "aiff" => "audio/aiff",
-        "caf" => "audio/x-caf",
-        _ => "application/octet-stream",
-    }
-}
+static PICK_SEQ: AtomicU64 = AtomicU64::new(1);
 
 // имя тестового файла: только латиница, цифры, «-», «_», «.»; без путей
 fn safe_name(s: &str) -> bool {
     !s.is_empty() && s.len() < 80 && !s.starts_with('.') && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
 }
 
-fn plain(status: StatusCode, msg: &str) -> Response<Vec<u8>> {
-    Response::builder()
-        .status(status)
-        .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
-        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
-        .body(msg.as_bytes().to_vec())
-        .unwrap()
-}
+fn lab_media(app: &tauri::AppHandle) -> Option<PathBuf> { app.path().resource_dir().ok().map(|d| d.join("lab-media")) }
 
-// «bytes=a-b», «bytes=a-», «bytes=-n» → (начало, конец включительно); None — заголовок непонятный
-fn parse_range(v: &str, len: u64) -> Option<(u64, u64)> {
-    let r = v.trim().strip_prefix("bytes=")?.split(',').next()?.trim();
-    let (a, b) = r.split_once('-')?;
-    if a.is_empty() {
-        let n: u64 = b.parse().ok()?;
-        if n == 0 || len == 0 { return None; }
-        return Some((len.saturating_sub(n), len - 1));
-    }
-    let start: u64 = a.parse().ok()?;
-    let end: u64 = if b.is_empty() { len.saturating_sub(1) } else { b.parse::<u64>().ok()?.min(len.saturating_sub(1)) };
-    Some((start, end))
-}
-
-fn serve(app: &tauri::AppHandle, path: &str, range: Option<String>) -> Response<Vec<u8>> {
-    let file: Option<PathBuf> = if let Some(n) = path.strip_prefix("/test/") {
-        if safe_name(n) { app.path().resource_dir().ok().map(|d| d.join("lab-media").join(n)) } else { None }
-    } else if let Some(id) = path.strip_prefix("/u/") {
-        app.state::<Picked>().files.lock().ok().and_then(|m| m.get(id).cloned())
-    } else {
-        None
-    };
-    let Some(fp) = file else { return plain(StatusCode::NOT_FOUND, "нет такого файла") };
-    let mut f = match File::open(&fp) { Ok(f) => f, Err(_) => return plain(StatusCode::NOT_FOUND, "файл не открывается") };
+// pulsetest://localhost/test/<имя> — тестовые файлы «Лаборатории» (этап 2)
+fn serve_test(app: &tauri::AppHandle, path: &str, range: Option<String>) -> Response<Vec<u8>> {
+    let n = path.trim_start_matches('/').strip_prefix("test/").unwrap_or("");
+    if !safe_name(n) { return resp::plain(StatusCode::NOT_FOUND, "нет такого файла"); }
+    let Some(fp) = lab_media(app).map(|d| d.join(n)) else { return resp::plain(StatusCode::NOT_FOUND, "нет папки") };
+    let mut f = match File::open(&fp) { Ok(f) => f, Err(_) => return resp::plain(StatusCode::NOT_FOUND, "файл не открывается") };
     let len = f.metadata().map(|m| m.len()).unwrap_or(0);
-    let ct = mime_of(&fp.to_string_lossy());
-
-    let (start, end, partial) = match range.as_deref().and_then(|r| parse_range(r, len)) {
-        Some((s, e)) => {
-            if s >= len || s > e {
-                return Response::builder()
-                    .status(StatusCode::RANGE_NOT_SATISFIABLE)
-                    .header(header::CONTENT_RANGE, format!("bytes */{len}"))
-                    .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
-                    .body(Vec::new())
-                    .unwrap();
-            }
-            (s, e.min(s + CHUNK - 1), true)
-        }
-        None if len > WHOLE_MAX => (0, CHUNK.min(len) - 1, true),
+    let ext = fp.extension().map(|e| e.to_string_lossy().to_string()).unwrap_or_default();
+    let ct = match ext.as_str() { "opus" => "audio/ogg; codecs=opus", "wv" => "audio/x-wavpack", "enc" => "application/octet-stream", e => localfile::mime_of_ext(e) };
+    let (start, end, partial) = match range.as_deref().and_then(resp::parse_want) {
+        Some(w) => match resp::resolve(w, len) { Some((a, b)) => (a, b.min(a + CHUNK - 1), true), None => return resp::not_satisfiable(&len.to_string()) },
         None => (0, len.saturating_sub(1), false),
     };
     let n = if len == 0 { 0 } else { end - start + 1 };
     let mut buf = vec![0u8; n as usize];
     if n > 0 && (f.seek(SeekFrom::Start(start)).is_err() || f.read_exact(&mut buf).is_err()) {
-        return plain(StatusCode::INTERNAL_SERVER_ERROR, "ошибка чтения");
+        return resp::plain(StatusCode::INTERNAL_SERVER_ERROR, "ошибка чтения");
     }
-    let mut b = Response::builder()
-        .status(if partial { StatusCode::PARTIAL_CONTENT } else { StatusCode::OK })
-        .header(header::CONTENT_TYPE, ct)
-        .header(header::CONTENT_LENGTH, n.to_string())
-        .header(header::ACCEPT_RANGES, "bytes")
-        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
-        .header(header::ACCESS_CONTROL_EXPOSE_HEADERS, "Content-Range, Content-Length, Accept-Ranges")
-        .header(header::CACHE_CONTROL, "no-store");
-    if partial {
-        b = b.header(header::CONTENT_RANGE, format!("bytes {start}-{end}/{len}"));
-    }
-    b.body(buf).unwrap()
+    resp::media(ct, buf, if partial { Some((start, len.to_string())) } else { None }, "no-store")
 }
 
-// выбрать свои файлы для проверки: окно получает только номер и имя, путь остаётся в программе
+fn range_of(req: &tauri::http::Request<Vec<u8>>) -> Option<String> {
+    req.headers().get(header::RANGE).and_then(|v| v.to_str().ok()).map(|s| s.to_string())
+}
+
+// выбрать свои файлы: окно получает только номер, имя и адрес pulsefile://, путь остаётся в программе
 #[tauri::command]
 async fn pick_files(app: tauri::AppHandle) -> Result<Vec<serde_json::Value>, String> {
-    let picked = app
-        .dialog()
-        .file()
-        .set_title("Выберите музыку для проверки")
-        .add_filter("Музыка", AUDIO_EXT)
-        .blocking_pick_files();
+    let picked = app.dialog().file().set_title("Выберите музыку для проверки").add_filter("Музыка", AUDIO_EXT).blocking_pick_files();
     let Some(list) = picked else { return Ok(vec![]) };
-    let st = app.state::<Picked>();
     let mut out = Vec::new();
     for fp in list.into_iter().take(50) {
         let Ok(p) = fp.into_path() else { continue };
-        let id = st.seq.fetch_add(1, Ordering::Relaxed).to_string();
+        let id = format!("pick-{}", PICK_SEQ.fetch_add(1, Ordering::Relaxed));
         let name = p.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
         let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
-        if let Ok(mut m) = st.files.lock() { m.insert(id.clone(), p); }
-        out.push(serde_json::json!({ "id": id, "name": name, "size": size }));
+        localfile::register(&id, localfile::Src::File(p));
+        out.push(serde_json::json!({ "id": id, "name": name, "size": size, "url": format!("pulsefile://a/{id}") }));
     }
     Ok(out)
 }
 
-// сохранить отчёт проверки туда, куда скажете
 #[tauri::command]
 async fn save_report(app: tauri::AppHandle, text: String) -> Result<bool, String> {
     if text.len() > 5 * 1024 * 1024 { return Err("отчёт слишком большой".into()); }
@@ -159,7 +89,6 @@ async fn save_report(app: tauri::AppHandle, text: String) -> Result<bool, String
     Ok(true)
 }
 
-// сведения о системе для отчёта
 #[tauri::command]
 fn env_info(app: tauri::AppHandle) -> serde_json::Value {
     let mut os_ver = String::new();
@@ -169,29 +98,27 @@ fn env_info(app: tauri::AppHandle) -> serde_json::Value {
             os_ver = String::from_utf8_lossy(&o.stdout).trim().to_string();
         }
     }
-    serde_json::json!({
-        "os": std::env::consts::OS,
-        "osVersion": os_ver,
-        "arch": std::env::consts::ARCH,
-        "app": app.package_info().version.to_string(),
-        "tauri": tauri::VERSION,
-    })
+    serde_json::json!({ "os": std::env::consts::OS, "osVersion": os_ver, "arch": std::env::consts::ARCH, "app": app.package_info().version.to_string(), "tauri": tauri::VERSION })
 }
 
-// открыть настоящий интерфейс «Пульса» (0.38.0) с демо-данными
+// частота и разрядность играющего трека Яндекса (как ya:fmt в Electron-версии)
+#[tauri::command]
+fn ya_fmt(url: String) -> Option<yastream::Fmt> { yastream::fmt_of(&url) }
+
+// тестовые потоки «Яндекса» для лаборатории
+#[tauri::command]
+fn lab_streams() -> Vec<serde_json::Value> {
+    lab::STREAMS.iter().map(|s| serde_json::json!({ "id": s.id, "name": s.name, "url": format!("pulseya://s/{}", s.id), "plain": s.plain, "encrypted": s.key.is_some() })).collect()
+}
+
 #[tauri::command]
 async fn open_ui(app: tauri::AppHandle) -> Result<(), String> {
-    if let Some(w) = app.get_webview_window("main") {
-        let _ = w.show();
-        let _ = w.set_focus();
-        return Ok(());
-    }
+    if let Some(w) = app.get_webview_window("main") { let _ = w.show(); let _ = w.set_focus(); return Ok(()); }
     let b = WebviewWindowBuilder::new(&app, "main", WebviewUrl::App("index.html".into()))
         .title("Пульс")
         .inner_size(1440.0, 900.0)
         .min_inner_size(1040.0, 680.0)
         .initialization_script(DEMO_BRIDGE);
-    // как в Electron-версии: своя шапка, системные кнопки окна поверх интерфейса
     #[cfg(target_os = "macos")]
     let b = b.title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true);
     b.build().map_err(|e| e.to_string())?;
@@ -202,14 +129,32 @@ async fn open_ui(app: tauri::AppHandle) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(Picked::default())
+        .setup(|app| {
+            if let Some(m) = lab_media(app.handle()) { lab::setup(m); }
+            Ok(())
+        })
         .register_asynchronous_uri_scheme_protocol("pulsetest", |ctx, req, responder| {
             let app = ctx.app_handle().clone();
             let path = req.uri().path().to_string();
-            let range = req.headers().get(header::RANGE).and_then(|v| v.to_str().ok()).map(|s| s.to_string());
-            std::thread::spawn(move || responder.respond(serve(&app, &path, range)));
+            let range = range_of(&req);
+            tauri::async_runtime::spawn_blocking(move || responder.respond(serve_test(&app, &path, range)));
         })
-        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui])
+        .register_asynchronous_uri_scheme_protocol("pulsefile", |_ctx, req, responder| {
+            let (sec, rest) = resp::split_uri(req.uri());
+            let id = rest.split('/').next().unwrap_or("").to_string();
+            let range = range_of(&req);
+            tauri::async_runtime::spawn_blocking(move || responder.respond(localfile::serve(&sec, &id, range)));
+        })
+        .register_asynchronous_uri_scheme_protocol("pulseya", |_ctx, req, responder| {
+            let (sec, rest) = resp::split_uri(req.uri());
+            let id = rest.split('/').next().unwrap_or("").to_string();
+            let range = range_of(&req);
+            tauri::async_runtime::spawn(async move {
+                let r = if sec == "s" { yastream::serve(&id, range).await } else { resp::plain(StatusCode::NOT_FOUND, "нет такого раздела") };
+                responder.respond(r);
+            });
+        })
+        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams])
         .run(tauri::generate_context!())
         .expect("не удалось запустить Пульс (Tauri)");
 }

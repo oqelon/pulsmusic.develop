@@ -1,4 +1,9 @@
 [[permission]]
 identifier = "allow-lab"
-description = "Команды тестового окна «Лаборатория звука»: выбрать свои файлы, сохранить отчёт, сведения о системе, открыть интерфейс с демо-данными."
-commands.allow = ["pick_files", "save_report", "env_info", "open_ui"]
+description = "Команды тестового окна «Лаборатория звука»: выбрать свои файлы, сохранить отчёт, сведения о системе, открыть интерфейс с демо-данными, тестовые потоки, формат звука Яндекса."
+commands.allow = ["pick_files", "save_report", "env_info", "open_ui", "ya_fmt", "lab_streams"]
+
+[[permission]]
+identifier = "allow-player"
+description = "Окно «Пульса»: только узнать частоту и разрядность играющего трека Яндекса (как ya:fmt в Electron)."
+commands.allow = ["ya_fmt"]

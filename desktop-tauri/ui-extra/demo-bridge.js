@@ -1,5 +1,5 @@
-// Подставной window.pulse для ТЕСТОВОЙ сборки на Tauri (этап 2 миграции).
-// Интерфейс «Пульса» 0.38.0 остаётся как есть; вместо Яндекса — 14 демо-треков, каждый играет свой тестовый
+// Подставной window.pulse для ТЕСТОВОЙ сборки на Tauri (этапы 2–3 миграции).
+// Интерфейс «Пульса» 0.38.0 остаётся как есть; вместо Яндекса — демо-треки, каждый играет свой тестовый
 // файл (FLAC, ALAC, AAC, MP3, OGG, Opus, WebM, WAV…) через схему pulsetest://. Так на Mac проверяется настоящий
 // плеер: мини-плеер, перемотка, эквалайзер, кроссфейд, выбор устройства вывода, фоновое воспроизведение.
 // Никаких сетевых запросов, токенов и личных данных здесь нет.
@@ -11,8 +11,19 @@
   // на Windows WebView2 открывает свои схемы как http://<схема>.localhost
   var BASE = WIN ? 'http://pulsetest.localhost/test/' : 'pulsetest://localhost/test/';
 
-  // [файл, название, кодек, кбит/с, без потерь, качество]
+  var YA = WIN ? 'http://pulseya.localhost/s/' : 'pulseya://s/';
+  var FILE = WIN ? 'http://pulsefile.localhost/a/' : 'pulsefile://a/';
+  // [файл или адрес, название, кодек, кбит/с, без потерь, качество]
+  // Первые — этап 3: звук отдаёт Rust так же, как будет в настоящем «Пульсе» (pulseya:// и pulsefile://)
   var F = [
+    [YA + 'lab-flac16', 'Яндекс-поток: FLAC 16/44 (расшифровка в Rust)', 'flac-mp4', 900, true, 'lossless'],
+    [YA + 'lab-flac24', 'Яндекс-поток: FLAC 24/96 (расшифровка в Rust)', 'flac-mp4', 3000, true, 'lossless'],
+    [YA + 'lab-aac', 'Яндекс-поток: AAC 256', 'aac-mp4', 256, false, 'hq'],
+    [YA + 'lab-mp3', 'Яндекс-поток: MP3 320', 'mp3', 320, false, 'hq'],
+    [YA + 'lab-retry', 'Яндекс-поток: запасная ссылка', 'flac-mp4', 900, true, 'lossless'],
+    [FILE + 'lab-flac', 'Свой файл: FLAC 24/96', 'flac', 3000, true, 'lossless'],
+    [FILE + 'lab-cd', 'Свой файл: образ аудио-CD → WAV', 'wav', 1411, true, 'lossless'],
+    [FILE + 'lab-aiff', 'Свой файл: AIFF', 'aiff', 1411, true, 'lossless'],
     ['flac-16-44.flac', 'FLAC 16 бит / 44,1 кГц', 'flac', 900, true, 'lossless'],
     ['flac-24-96.flac', 'FLAC 24 бит / 96 кГц', 'flac', 3000, true, 'lossless'],
     ['flac-24-192.flac', 'FLAC 24 бит / 192 кГц', 'flac', 6000, true, 'lossless'],
@@ -66,18 +77,20 @@
     stream: function (tk, id) {
       var i = byId[id]; if (i == null) i = (parseInt(String(id).replace(/\D/g, ''), 10) || 0) % F.length;
       var f = F[i];
-      return ok({ url: BASE + f[0], codec: f[2], bitrate: f[3], lossless: f[4], quality: f[5], preview: false });
+      return ok({ url: /:\/\//.test(f[0]) ? f[0] : BASE + f[0], codec: f[2], bitrate: f[3], lossless: f[4], quality: f[5], preview: false });
     },
     // схема своя, отдаёт Access-Control-Allow-Origin: * — эквалайзер можно подключать
     audioCors: function () { return Promise.resolve(true); },
+    // частота и разрядность потока Яндекса — узнаёт Rust по первым байтам (единственная команда, доступная этому окну)
+    yaFmt: function (u) { var T = window.__TAURI__; return T && T.core ? T.core.invoke('ya_fmt', { url: String(u || '') }) : Promise.resolve(null); },
     landing: function () {
       return ok({
         personal: [pl('Плейлист дня', 0, 'Все тестовые форматы'), pl('Без потерь', 1, 'FLAC, ALAC, WAV'), pl('Сжатый звук', 2, 'MP3, AAC, OGG, Opus'), pl('Контейнеры', 3, 'MP4, OGG, WebM')],
         releases: T.slice(0, 8).map(function (t, i) { return { id: 'r' + i, title: t.title, year: 2026, cover: cover(i + 1) }; }),
-        playlists: [pl('Проверка звука', 4, '14 файлов по 10 секунд'), pl('Кроссфейд', 5, 'Переходы между форматами')],
+        playlists: [pl('Проверка звука', 4, T.length + ' треков по 10 секунд'), pl('Кроссфейд', 5, 'Переходы между форматами')],
       });
     },
-    playlist: function () { return ok({ info: { title: 'Проверка звука', desc: '14 тестовых файлов', cover: cover(0), coverBig: cover(0) }, tracks: T }); },
+    playlist: function () { return ok({ info: { title: 'Проверка звука', desc: T.length + ' тестовых треков', cover: cover(0), coverBig: cover(0) }, tracks: T }); },
     openExternal: function (u) { try { window.open(u, '_blank'); } catch (e) {} },
     onAiStatus: function () { return function () {}; },
     aiStatus: function () { return Promise.resolve(null); },
