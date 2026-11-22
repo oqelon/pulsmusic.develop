@@ -22,6 +22,10 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 aes = "0.8"
 ctr = "0.9"
 getrandom = "0.2"
+# этап 4: запросы к Яндексу из окна, открытие ссылок, токен в Связке ключей
+tauri-plugin-http = "2"
+tauri-plugin-opener = "2"
+keyring = { version = "3", features = ["apple-native", "windows-native"] }
 
 [profile.release]
 codegen-units = 1

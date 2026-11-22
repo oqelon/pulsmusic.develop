@@ -2,7 +2,7 @@
 # Готовит папку ui/ для тестовой сборки на Tauri:
 #  • интерфейс «Пульса» берётся из уже выпущенного обновления (updates/<версия>/pulse-app-<версия>.zip, папка dist/) —
 #    тот же самый, что у пользователей Electron-версии, без изменений;
-#  • рядом кладётся «Лаборатория звука» (ui-extra/lab.html);
+#  • рядом кладётся «Лаборатория звука» (ui-extra/lab.html) и мост window.pulse (bridge/, этап 4);
 #  • в копии index.html к правилам безопасности (CSP) добавляется тестовая схема pulsetest:, иначе WebView не пустит
 #    звук демо-треков. Исходники приложения при этом не меняются.
 set -euo pipefail
@@ -12,10 +12,12 @@ ZIP="../updates/$VER/pulse-app-$VER.zip"
 [ -f "$ZIP" ] || { echo "нет $ZIP"; exit 1; }
 rm -rf ui && mkdir -p ui
 TMP="$(mktemp -d)"
-unzip -q "$ZIP" 'dist/*' -d "$TMP"
+unzip -q "$ZIP" 'dist/*' yandex.js -d "$TMP"
 cp -R "$TMP/dist/." ui/
-rm -rf "$TMP"
 cp ui-extra/lab.html ui/lab.html
+# этап 4: мост window.pulse для Tauri (тот же yandex.js из этого выпуска, запросы через tauri-plugin-http)
+node bridge/build.mjs "$TMP/yandex.js" ui
+rm -rf "$TMP"
 python3 - <<'PY'
 import re, pathlib
 p = pathlib.Path('ui/index.html'); s = p.read_text(encoding='utf-8')

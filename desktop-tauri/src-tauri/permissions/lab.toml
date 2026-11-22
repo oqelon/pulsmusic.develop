@@ -5,5 +5,5 @@ commands.allow = ["pick_files", "save_report", "env_info", "open_ui", "ya_fmt", 
 
 [[permission]]
 identifier = "allow-player"
-description = "Окно «Пульса»: только узнать частоту и разрядность играющего трека Яндекса (как ya:fmt в Electron)."
-commands.allow = ["ya_fmt"]
+description = "Окно «Пульса»: зарегистрировать ссылку на звук Яндекса (ya_add), узнать её формат (ya_fmt), сохранить токен в Связке ключей (token_set)."
+commands.allow = ["ya_fmt", "ya_add", "token_set"]

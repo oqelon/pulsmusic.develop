@@ -4,9 +4,10 @@
 // Этап 3: звук «Пульса» отдаёт Rust, а не Node:
 //  • pulseya://s/<id>  — звук Яндекса: запрос к серверу кусками, расшифровка FLAC (AES-CTR) на лету (yastream.rs);
 //  • pulsefile://a/<id> и pulsefile://c/<id> — свои файлы и обложки, в том числе кусок образа диска как WAV (localfile.rs).
-// Окно «Пульс» — интерфейс 0.38.0 без изменений, с демо-треками (часть из них играет через pulseya:// и pulsefile://).
+// Этап 4: окно «Пульс» — интерфейс 0.38.0 без изменений и настоящий Яндекс: тот же yandex.js в окне (мост
+// pulse-bridge.js, запросы через tauri-plugin-http), ссылки на звук — в pulseya://, токен — в Связке ключей.
 //
-// Чего здесь ещё нет (следующие этапы): Яндекс API и вход (этап 4), перенос данных (этап 5), разбор своих папок,
+// Чего здесь ещё нет (следующие этапы): перенос данных (этап 5), разбор своих папок,
 // CD, Discord, обновления (этап 6). Данные этой сборки хранятся отдельно (ru.pulse.desktop.tauritest) — обычный
 // «Пульс» на Electron, его настройки, лайки и токен она не видит и не трогает.
 
@@ -24,8 +25,9 @@ use tauri::http::{header, Response, StatusCode};
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
 
-// подставной window.pulse для окна интерфейса (демо-треки)
-const DEMO_BRIDGE: &str = include_str!("../../ui-extra/demo-bridge.js");
+// токен Яндекса — в Связке ключей macOS (Windows: диспетчер учётных данных), отдельно от Electron-версии
+const KEY_SERVICE: &str = "ru.pulse.desktop.tauritest";
+const KEY_USER: &str = "yandex-token";
 const CHUNK: u64 = 4 * 1024 * 1024;
 const AUDIO_EXT: &[&str] = &["flac", "mp3", "m4a", "m4b", "aac", "mp4", "ogg", "oga", "opus", "webm", "weba", "wav", "aif", "aiff", "alac", "caf", "wv", "ape"];
 
@@ -101,6 +103,27 @@ fn env_info(app: tauri::AppHandle) -> serde_json::Value {
     serde_json::json!({ "os": std::env::consts::OS, "osVersion": os_ver, "arch": std::env::consts::ARCH, "app": app.package_info().version.to_string(), "tauri": tauri::VERSION })
 }
 
+fn token_get() -> String {
+    keyring::Entry::new(KEY_SERVICE, KEY_USER).and_then(|e| e.get_password()).unwrap_or_default()
+}
+
+// сохранить токен (пустой — удалить), как secret:set в Electron-версии
+#[tauri::command]
+fn token_set(token: String) -> Result<(), String> {
+    let t = token.trim();
+    if t.len() > 4096 { return Err("слишком длинный токен".into()); }
+    let e = keyring::Entry::new(KEY_SERVICE, KEY_USER).map_err(|e| e.to_string())?;
+    if t.is_empty() {
+        match e.delete_credential() { Ok(()) | Err(keyring::Error::NoEntry) => Ok(()), Err(x) => Err(x.to_string()) }
+    } else {
+        e.set_password(t).map_err(|e| e.to_string())
+    }
+}
+
+// ссылки на звук Яндекса (и ключ) → адрес pulseya:// (как ys.add в Electron-версии)
+#[tauri::command]
+fn ya_add(urls: Vec<String>, key: Option<String>, codec: Option<String>) -> Result<String, String> { yastream::add(urls, key, codec) }
+
 // частота и разрядность играющего трека Яндекса (как ya:fmt в Electron-версии)
 #[tauri::command]
 fn ya_fmt(url: String) -> Option<yastream::Fmt> { yastream::fmt_of(&url) }
@@ -118,11 +141,14 @@ fn lab_ya_log(id: String) -> Vec<yastream::LogRow> { yastream::log_of(&id) }
 #[tauri::command]
 async fn open_ui(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(w) = app.get_webview_window("main") { let _ = w.show(); let _ = w.set_focus(); return Ok(()); }
+    // токен — один раз в окно при открытии (как preload.js в Electron читал его из зашифрованного хранилища);
+    // мост (pulse-bridge.js) забирает его и убирает из window
+    let tok = serde_json::to_string(&token_get()).unwrap_or_else(|_| "\"\"".into());
     let b = WebviewWindowBuilder::new(&app, "main", WebviewUrl::App("index.html".into()))
         .title("Пульс")
         .inner_size(1440.0, 900.0)
         .min_inner_size(1040.0, 680.0)
-        .initialization_script(DEMO_BRIDGE);
+        .initialization_script(format!("window.__PULSE_TOKEN__ = {tok};"));
     #[cfg(target_os = "macos")]
     let b = b.title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true);
     b.build().map_err(|e| e.to_string())?;
@@ -133,6 +159,8 @@ async fn open_ui(app: tauri::AppHandle) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_http::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             if let Some(m) = lab_media(app.handle()) { lab::setup(m); }
             Ok(())
@@ -158,7 +186,7 @@ pub fn run() {
                 responder.respond(r);
             });
         })
-        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams, lab_ya_log])
+        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams, lab_ya_log, ya_add, token_set])
         .run(tauri::generate_context!())
         .expect("не удалось запустить Пульс (Tauri)");
 }

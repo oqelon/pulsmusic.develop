@@ -1,7 +1,21 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "Окно интерфейса «Пульса» в тестовой сборке: единственная команда — формат играющего трека Яндекса.",
+  "description": "Окно «Пульса» (этап 4): свои команды звука и токена; запросы — только к Яндексу и LRCLIB (тексты); ссылки открываются в браузере; во весь экран. Файлов и системы окно не видит.",
   "windows": ["main"],
-  "permissions": ["allow-player"]
+  "permissions": [
+    "allow-player",
+    "core:default",
+    "core:window:allow-set-fullscreen",
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "https://api.music.yandex.net" },
+        { "url": "https://*.yandex.net" },
+        { "url": "https://*.yandex.ru" },
+        { "url": "https://lrclib.net" }
+      ]
+    },
+    "opener:default"
+  ]
 }

@@ -2,7 +2,7 @@
 fn main() {
     tauri_build::try_build(
         tauri_build::Attributes::new().app_manifest(
-            tauri_build::AppManifest::new().commands(&["pick_files", "save_report", "env_info", "open_ui","ya_fmt","lab_streams","lab_ya_log"]),
+            tauri_build::AppManifest::new().commands(&["pick_files", "save_report", "env_info", "open_ui","ya_fmt","lab_streams","lab_ya_log","ya_add","token_set"]),
         ),
     )
     .expect("tauri-build");

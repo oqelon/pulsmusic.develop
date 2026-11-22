@@ -20,7 +20,6 @@ use crate::resp::{self, Want};
 
 const LIFE: Duration = Duration::from_secs(6 * 3600);
 const MAX: usize = 300;
-#[allow(dead_code)] // понадобится на этапе 4 (ya_add)
 pub const CHUNK: u64 = 2 * 1024 * 1024;
 
 struct Entry {
@@ -86,7 +85,6 @@ fn parse_key(k: Option<&str>) -> Option<Vec<u8>> {
     (0..k.len()).step_by(2).map(|i| u8::from_str_radix(&k[i..i + 2], 16).ok()).collect()
 }
 
-#[allow(dead_code)]
 fn new_id() -> String {
     let mut b = [0u8; 12];
     if getrandom::getrandom(&mut b).is_err() {
@@ -97,7 +95,7 @@ fn new_id() -> String {
 }
 
 /// Ссылки (и ключ, если звук зашифрован) → адрес для плеера.
-#[allow(dead_code)] // этап 4: вызывается из кода Яндекса (ya_add)
+/// Этап 4: вызывается из yandex.js (команда ya_add).
 pub fn add(urls: Vec<String>, key: Option<String>, codec: Option<String>) -> Result<String, String> {
     add_as(new_id(), urls, key, codec, CHUNK)
 }
