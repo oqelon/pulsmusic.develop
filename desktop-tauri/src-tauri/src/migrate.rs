@@ -26,7 +26,6 @@ use std::sync::Mutex;
 use serde_json::{json, Value};
 use tauri::Manager;
 
-const KS: &str = if crate::RELEASE { "ru.pulse.desktop" } else { "ru.pulse.desktop.tauritest" };
 static RUN: Mutex<()> = Mutex::new(());
 
 fn now_stamp() -> (u64, String) {
@@ -158,15 +157,9 @@ fn read_secret_file(p: &Path, key: &mut Option<Result<Vec<u8>, String>>) -> Resu
     }
 }
 
-// ——— хранилище ключей друзей в этой программе (как токен: Связка ключей, запасной файл 0600) ———
-fn kc_get(user: &str) -> Option<String> { keyring::Entry::new(KS, user).and_then(|e| e.get_password()).ok().filter(|s| !s.is_empty()) }
-fn kc_set(user: &str, v: &str) -> Result<(), String> {
-    let e = keyring::Entry::new(KS, user).map_err(|e| e.to_string())?;
-    if v.is_empty() { let _ = e.delete_credential(); return Ok(()); }
-    e.set_password(v).map_err(|e| e.to_string())?;
-    if e.get_password().map_err(|e| e.to_string())? != v { return Err("Связка ключей вернула другое значение".into()); }
-    Ok(())
-}
+// ——— хранилище ключей друзей в этой программе (как токен: secrets.rs — Mac: защищённый файл, Windows: Диспетчер учётных данных; запасной файл 0600) ———
+fn kc_get(user: &str) -> Option<String> { crate::secrets::get(user).ok().flatten() }
+fn kc_set(user: &str, v: &str) -> Result<(), String> { crate::secrets::set(user, v) }
 fn social_file(app: &tauri::AppHandle) -> Option<PathBuf> { app.path().app_data_dir().ok().map(|d| d.join("social.json")) }
 pub fn social_read(app: &tauri::AppHandle) -> Value {
     let s = kc_get("social").or_else(|| social_file(app).and_then(|p| std::fs::read_to_string(p).ok())).unwrap_or_default();
@@ -175,8 +168,8 @@ pub fn social_read(app: &tauri::AppHandle) -> Value {
 pub fn social_write(app: &tauri::AppHandle, v: &Value) -> Result<String, String> {
     let s = v.to_string();
     match kc_set("social", &s) {
-        Ok(()) => { if let Some(p) = social_file(app) { let _ = std::fs::remove_file(p); } Ok("Связка ключей".into()) }
-        Err(e) => { let p = social_file(app).ok_or("нет папки данных")?; if let Some(d) = p.parent() { let _ = std::fs::create_dir_all(d); } write_private(&p, &s)?; Ok(format!("запасной файл (Связка ключей: {e})")) }
+        Ok(()) => { if let Some(p) = social_file(app) { let _ = std::fs::remove_file(p); } Ok(crate::secrets::place().into()) }
+        Err(e) => { let p = social_file(app).ok_or("нет папки данных")?; if let Some(d) = p.parent() { let _ = std::fs::create_dir_all(d); } write_private(&p, &s)?; Ok(format!("запасной файл ({}: {e})", crate::secrets::place())) }
     }
 }
 

@@ -23,6 +23,7 @@ mod library;
 mod localfile;
 mod migrate;
 mod resp;
+mod secrets;
 mod updater;
 mod yastream;
 
@@ -40,7 +41,6 @@ use tauri_plugin_dialog::DialogExt;
 /// выпускная сборка (при сборке задан PULSE_RELEASE): без «Лаборатории», тестовых файлов и тестового канала
 /// обновлений; окно «Пульса» открывается сразу. Тестовые сборки — как раньше.
 pub const RELEASE: bool = option_env!("PULSE_RELEASE").is_some();
-const KEY_SERVICE: &str = if RELEASE { "ru.pulse.desktop" } else { "ru.pulse.desktop.tauritest" };
 const KEY_USER: &str = "yandex-token";
 const CHUNK: u64 = 4 * 1024 * 1024;
 const AUDIO_EXT: &[&str] = &["flac", "mp3", "m4a", "m4b", "aac", "mp4", "ogg", "oga", "opus", "webm", "weba", "wav", "aif", "aiff", "alac", "caf", "wv", "ape", "dsf", "dff"];
@@ -122,21 +122,22 @@ fn env_info(app: tauri::AppHandle) -> serde_json::Value {
 // владельца (0600). Используется, только когда Связка ключей отказала, — и об этом пишется в журнал лаборатории.
 fn token_file(app: &tauri::AppHandle) -> Option<PathBuf> { app.path().app_data_dir().ok().map(|d| d.join("yandex-token")) }
 
-/// → (токен, как прочитали — для журнала)
+/// → (токен, как прочитали — для журнала). Где хранится — secrets.rs (Mac — защищённый файл, Windows — Диспетчер учётных данных)
 fn token_get(app: &tauri::AppHandle) -> (String, String) {
-    match keyring::Entry::new(KEY_SERVICE, KEY_USER).and_then(|e| e.get_password()) {
-        Ok(t) if !t.is_empty() => return (t.clone(), format!("Связка ключей: токен есть (длина {})", t.len())),
-        Ok(_) | Err(keyring::Error::NoEntry) => {}
+    let w = secrets::place();
+    match secrets::get(KEY_USER) {
+        Ok(Some(t)) => return (t.clone(), format!("{w}: токен есть (длина {})", t.len())),
+        Ok(None) => {}
         Err(e) => {
             let f = token_file(app).and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
             let f = f.trim().to_string();
-            return (f.clone(), format!("Связка ключей: ошибка «{e}»; запасной файл: {}", if f.is_empty() { "пусто".to_string() } else { format!("токен есть (длина {})", f.len()) }));
+            return (f.clone(), format!("{w}: ошибка «{e}»; запасной файл: {}", if f.is_empty() { "пусто".to_string() } else { format!("токен есть (длина {})", f.len()) }));
         }
     }
     let f = token_file(app).and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
     let f = f.trim().to_string();
-    if !f.is_empty() { return (f.clone(), format!("Связка ключей: пусто; запасной файл: токен есть (длина {})", f.len())); }
-    (String::new(), "Связка ключей: токена нет".into())
+    if !f.is_empty() { return (f.clone(), format!("{w}: пусто; запасной файл: токен есть (длина {})", f.len())); }
+    (String::new(), format!("{w}: токена нет"))
 }
 
 fn write_token_file(app: &tauri::AppHandle, t: &str) -> Result<(), String> {
@@ -154,18 +155,17 @@ fn write_token_file(app: &tauri::AppHandle, t: &str) -> Result<(), String> {
 fn token_set(app: tauri::AppHandle, token: String) -> Result<String, String> {
     let t = token.trim();
     if t.len() > 4096 { return Err("слишком длинный токен".into()); }
-    let e = keyring::Entry::new(KEY_SERVICE, KEY_USER).map_err(|e| e.to_string());
+    let w = secrets::place();
     if t.is_empty() {
-        if let Ok(e) = &e { let _ = e.delete_credential(); }
+        let _ = secrets::set(KEY_USER, "");
         let _ = write_token_file(&app, "");
         return Ok("удалён".into());
     }
-    // в Связку ключей — и сразу проверяем, что читается обратно
-    let kc = e.and_then(|e| { e.set_password(t).map_err(|x| x.to_string())?; e.get_password().map_err(|x| x.to_string()) });
-    match kc {
-        Ok(back) if back == t => { let _ = write_token_file(&app, ""); Ok(format!("Связка ключей (длина {})", t.len())) }
-        Ok(_) => { write_token_file(&app, t)?; Ok("Связка ключей вернула другое значение — сохранён в запасной файл".into()) }
-        Err(x) => { write_token_file(&app, t)?; Ok(format!("Связка ключей: ошибка «{x}» — сохранён в запасной файл")) }
+    // в хранилище — и сразу проверяем, что читается обратно
+    match secrets::set(KEY_USER, t).and_then(|_| secrets::get(KEY_USER)) {
+        Ok(Some(back)) if back == t => { let _ = write_token_file(&app, ""); Ok(format!("{w} (длина {})", t.len())) }
+        Ok(_) => { write_token_file(&app, t)?; Ok(format!("{w} вернул другое значение — сохранён в запасной файл")) }
+        Err(x) => { write_token_file(&app, t)?; Ok(format!("{w}: ошибка «{x}» — сохранён в запасной файл")) }
     }
 }
 
@@ -712,6 +712,7 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            secrets::init(data_dir(app.handle()));   // до всего, что читает токен и ключи друзей
             if !RELEASE { if let Some(m) = lab_media(app.handle()) { lab::setup(m); } }
             else { let h = app.handle().clone(); tauri::async_runtime::spawn(async move { let _ = open_ui(h).await; }); }
             engine::start(Some(app.handle().clone()));
