@@ -169,6 +169,11 @@ Bit-perfect — задача будущего PULSE Audio Engine.
   «Сейчас играет»/медиаклавиши — беззвучный <audio>, пока играет движок.
 - `player.js`: 6 точечных правок под флагом ENGINE (только Tauri); Electron-версия не меняется.
 - Отключить движок (на случай проблем): localStorage `pulse.engine = off` → прежний <audio>.
+- Проверка в CI (сборка 20, macOS arm64): 15 тестов Rust пройдены, в том числе `seek_is_exact_and_flushes`
+  (после перемотки в буфере только звук нового места, позиция точная), `decode_formats` (MP3, AAC, FLAC 16/44 и 24/96,
+  FLAC в MP4, ALAC, WAV, OGG, AIFF), `eq_flat_is_transparent`. Найдено: FLAC 32 бит Symphonia не декодирует —
+  такой поток уходит в <audio>.
+- Статус: **НУЖНА ПРОВЕРКА НА MAC** (сборка tauri-test-20). Работающим не считается до проверки владельцем.
 
 ## Файлы
 - `src-tauri/` — Rust-часть: `yastream.rs` (pulseya://), `localfile.rs` (pulsefile://), `resp.rs` (Range, ответы), `lab.rs` (тестовый сервер), `lib.rs` (схемы, команды, окна).
