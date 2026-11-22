@@ -94,7 +94,8 @@ async fn get_json(c: &reqwest::Client, url: &str, ms: u64, accept: &str) -> Resu
     let r = c.get(bust(url)).header("Accept", accept).timeout(std::time::Duration::from_millis(ms)).send().await.map_err(|e| (None, e.to_string()))?;
     let s = r.status().as_u16();
     if !r.status().is_success() { return Err((Some(s), format!("ответ {s}"))); }
-    r.json::<Value>().await.map_err(|e| (None, e.to_string()))
+    let b = r.bytes().await.map_err(|e| (None, e.to_string()))?;
+    serde_json::from_slice(&b).map_err(|e| (None, e.to_string()))
 }
 
 /// latest.json: тестовый канал — только его адрес; обычный — три источника сразу, берём самую новую подписанную
