@@ -316,12 +316,13 @@
   // кнопки сами — в стиле Windows 11, на том же месте и того же размера. Исходники интерфейса не меняются.
   (function () {
     var queued = false;
-    var mark = function () { queued = false; var l = document.querySelectorAll('.win-drag:not([data-tauri-drag-region])'); for (var i = 0; i < l.length; i++) l[i].setAttribute('data-tauri-drag-region', ''); };
+    var mark = function () { queued = false; try { var l = document.querySelectorAll('.win-drag:not([data-tauri-drag-region])'); for (var i = 0; i < l.length; i++) l[i].setAttribute('data-tauri-drag-region', ''); } catch (x) {} };
     var start = function () {
+      if (typeof document.querySelectorAll !== 'function' || !document.documentElement) return;
       mark();
       try { new MutationObserver(function () { if (!queued) { queued = true; requestAnimationFrame(mark); } }).observe(document.documentElement, { childList: true, subtree: true }); } catch (x) {}
       if (!WIN) return;
-      var w = win(); if (!w) return;
+      var w = win(); if (!w || !document.head || !document.body) return;
       var css = document.createElement('style');
       css.textContent = '.pulse-cap{position:fixed;top:0;right:0;height:40px;display:flex;z-index:2147483000;-webkit-app-region:no-drag;user-select:none}' +
         '.pulse-cap button{width:46px;height:40px;border:0;margin:0;padding:0;background:transparent;color:#c7c7cc;font:10px "Segoe Fluent Icons","Segoe MDL2 Assets";display:flex;align-items:center;justify-content:center;cursor:default;outline:none;transition:background-color .1s}' +

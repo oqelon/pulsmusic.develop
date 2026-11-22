@@ -72,6 +72,9 @@ fn handle(mut s: TcpStream, dir: PathBuf) -> std::io::Result<()> {
 
 /// Запустить тестовый сервер для папки `dir` (один раз). Возвращает порт.
 pub fn start_server_at(dir: PathBuf) -> u16 {
+    // один сервер на всю программу: два одновременных вызова (тесты идут параллельно) не должны поднять два
+    static START: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _g = START.lock().unwrap_or_else(|e| e.into_inner());
     let p = PORT.load(Ordering::Relaxed);
     if p != 0 { return p; }
     let l = TcpListener::bind("127.0.0.1:0").expect("тестовый сервер");
