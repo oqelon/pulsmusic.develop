@@ -143,9 +143,19 @@ pub fn social_write(app: &tauri::AppHandle, v: &Value) -> Result<String, String>
 // ——— сводка: что перенесено ———
 fn summary(ls: &HashMap<String, String>) -> Value {
     let named = [("pulse.likes", "лайки"), ("pulse.playlists", "плейлисты"), ("pulse.recent", "недавнее"), ("pulse.heard", "история прослушиваний"), ("pulse.opened", "недавно открытые"), ("pulse.follow", "избранные исполнители"), ("pulse.banned", "скрытые"), ("pulse.stats", "статистика"), ("pulse.daySum", "статистика по дням"), ("pulse.ach", "достижения"), ("pulse.settings", "настройки"), ("pulse.sound", "звук"), ("pulse.acct", "аккаунт")];
+    // данные пользователя «Пульс» хранит по аккаунту Яндекса: «pulse.u.<uid>.<имя>» (app/core.js, USER_KEYS)
+    let acct = ls.get("pulse.acct").map(|s| s.trim_matches('"').to_string());
+    fn lookup<'a>(ls: &'a HashMap<String, String>, acct: Option<&str>, k: &str) -> Option<&'a String> {
+        let short = &k[6..];
+        if let Some(v) = acct.and_then(|a| ls.get(&format!("pulse.u.{a}.{short}"))) { return Some(v); }
+        let tail = format!(".{short}");
+        if let Some(v) = ls.iter().filter(|(kk, _)| kk.starts_with("pulse.u.") && kk.ends_with(&tail)).map(|(_, v)| v).max_by_key(|v| v.len()) { return Some(v); }
+        ls.get(k)
+    }
+    let get = |k: &str| lookup(ls, acct.as_deref(), k);
     let mut items = Vec::new();
     for (k, n) in named {
-        let v = match ls.get(k) { None => "нет".to_string(), Some(s) => match serde_json::from_str::<Value>(s) {
+        let v = match get(k) { None => "нет".to_string(), Some(s) => match serde_json::from_str::<Value>(s) {
             Ok(Value::Array(a)) => format!("{} шт.", a.len()),
             Ok(Value::Object(o)) => { let arr = o.values().filter_map(|x| x.as_array()).map(|a| a.len()).sum::<usize>(); if arr > 0 { format!("{} полей, {} записей", o.len(), arr) } else { format!("{} полей", o.len()) } }
             _ => format!("{} символов", s.len()),
@@ -267,6 +277,13 @@ pub fn status(app: &tauri::AppHandle) -> Value {
     let Ok(md) = mig_dir(app) else { return json!({ "status": "error" }) };
     let mut st = read_json(&md.join("state.json")).unwrap_or_else(|| json!({ "status": "none" }));
     st["canRestore"] = json!(md.join("before-localstorage.json").exists());
+    // сводку пересчитываем по сохранённой копии перенесённых записей (так видно и записи по аккаунту)
+    if let Some(d) = st["backup"]["dir"].as_str() {
+        if let Some(Value::Object(o)) = read_json(&Path::new(d).join("imported-localstorage.json")) {
+            let m: HashMap<String, String> = o.into_iter().filter_map(|(k, v)| v.as_str().map(|s| (k, s.to_string()))).collect();
+            st["ls"] = summary(&m);
+        }
+    }
     st
 }
 
@@ -343,5 +360,8 @@ mod tests {
         let mut m = HashMap::new(); m.insert("pulse.likes".to_string(), "[1,2,3]".to_string()); m.insert("pulse.stats".to_string(), r#"{"a":[1,2],"b":3}"#.to_string());
         let s = summary(&m); assert_eq!(s["keys"], 2);
         assert_eq!(s["items"][0]["v"], "3 шт.");
+        // по аккаунту: pulse.u.<uid>.likes
+        let mut m = HashMap::new(); m.insert("pulse.acct".to_string(), "1558".to_string()); m.insert("pulse.u.1558.likes".to_string(), "[1,2]".to_string()); m.insert("pulse.u.guest.likes".to_string(), "[9]".to_string());
+        assert_eq!(summary(&m)["items"][0]["v"], "2 шт.");
     }
 }
