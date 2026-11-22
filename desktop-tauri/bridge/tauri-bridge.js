@@ -37,6 +37,7 @@
 
   var token0 = typeof window.__PULSE_TOKEN__ === 'string' ? window.__PULSE_TOKEN__ : '';
   try { delete window.__PULSE_TOKEN__; } catch (e) { window.__PULSE_TOKEN__ = undefined; }
+  try { enote('token', 'при открытии окна: ' + (window.__PULSE_TOKEN_INFO__ || 'нет сведений')); delete window.__PULSE_TOKEN_INFO__; } catch (e) {}
 
   // Запросы yandex.js → tauri-plugin-http. Плагин сам добавляет заголовок Origin (tauri://localhost) — в Electron
   // (Node.js) его не было, и Яндекс на запрос с чужим Origin может ответить отказом. Пустой Origin плагин убирает
@@ -125,7 +126,7 @@
   // как app:version в Electron — функция, возвращающая обещание (Program.jsx вызывает window.pulse.version())
   P.version = function () { return Promise.resolve('0.38.0-tauri-test'); };
   P.initialToken = token0;
-  P.saveToken = function (t) { var v = tok(t); if (!tokOk(v)) { enote('token', 'не сохранён: ' + tokShape(v)); return Promise.resolve(false); } return invoke('token_set', { token: v }); };
+  P.saveToken = function (t) { var v = tok(t); if (!tokOk(v)) { enote('token', 'не сохранён: ' + tokShape(v)); return Promise.resolve(false); } return invoke('token_set', { token: v }).then(function (where) { enote('token', 'сохранён: ' + where); return true; }, function (e) { enote('token', 'не сохранён: ' + e); return false; }); };
   P.openExternal = function (u) {
     u = String(u || '');
     // «Получить токен» → окно входа в Яндекс внутри программы (токен программа заберёт сама)

@@ -232,8 +232,16 @@ pub async fn serve(id: &str, range: Option<String>) -> Response<Vec<u8>> {
 // Явно запрошенный кусок отдаётся целиком: AVFoundation недостающее не дозапрашивает (проверено на Mac 22.11 —
 // урезанный ответ останавливал звук).
 const BLOCK: u64 = 256 * 1024;
-const BLOCKS_PER_TRACK: usize = 96; // до 24 МБ на трек
-const TRACKS_CACHED: usize = 4; // играющий, затухающий при кроссфейде, следующий, запас
+const BLOCKS_PER_TRACK: usize = 640; // до 160 МБ на трек (трек прогревается целиком, см. prefetch)
+const TRACKS_CACHED: usize = 3; // играющий, затухающий при кроссфейде, следующий
+// Прогрев (по просьбе 22.11 после проверки на Mac: перемотка срабатывала через 1–2 с): как только известна длина
+// трека, программа в фоне скачивает его целиком кусками по 2 МБ и держит расшифрованным в памяти — перемотка в
+// любое место берёт звук из памяти. На диск ничего не пишется. Одновременно прогреваются не больше 2 треков,
+// треки больше 160 МБ не прогреваются (берутся по мере надобности, как раньше).
+const PREFETCH_RUN: u64 = 8; // блоков за запрос (2 МБ)
+const PREFETCH_MAX: u64 = 160 * 1024 * 1024;
+const PREFETCH_PARALLEL: usize = 2;
+const FIRST_RUN: u64 = 4; // первый запрос трека — 1 МБ: заголовки MP4 и начало звука сразу
 const EXPLICIT_MAX: u64 = 64 * 1024 * 1024;
 
 type Blk = std::sync::Arc<Vec<u8>>;
@@ -269,6 +277,42 @@ fn cache_put(id: &str, total: u64, idx: u64, b: Blk) {
 }
 
 enum FetchErr { NotSatisfiable(String), Other(String) }
+
+fn warming() -> &'static Mutex<std::collections::VecDeque<String>> {
+    static W: OnceLock<Mutex<std::collections::VecDeque<String>>> = OnceLock::new();
+    W.get_or_init(|| Mutex::new(Default::default()))
+}
+fn has_block(id: &str, i: u64) -> bool { caches().lock().map(|m| m.get(id).map(|c| c.blocks.contains_key(&i)).unwrap_or(false)).unwrap_or(false) }
+
+/// Прогреть трек целиком в фоне (один раз на трек; самый старый прогрев останавливается, если их больше 2).
+fn prefetch(id: &str, urls: Vec<String>, key: Option<Vec<u8>>, total: u64) {
+    if total == 0 || total > PREFETCH_MAX { return; }
+    {
+        let Ok(mut w) = warming().lock() else { return };
+        if w.iter().any(|x| x == id) { return; }
+        w.push_back(id.to_string());
+        while w.len() > PREFETCH_PARALLEL { w.pop_front(); }
+    }
+    let id = id.to_string();
+    tauri::async_runtime::spawn(async move {
+        let n = total.div_ceil(BLOCK);
+        let mut i = 0u64;
+        let mut fails = 0;
+        while i < n {
+            // остановлен (начался прогрев других треков) или трек выпал из памяти
+            let alive = warming().lock().map(|w| w.iter().any(|x| *x == id)).unwrap_or(false);
+            if !alive || cache_total(&id).is_none() { break; }
+            if has_block(&id, i) { i += 1; continue; }
+            let mut j = i;
+            while j + 1 < n && j + 1 - i < PREFETCH_RUN && !has_block(&id, j + 1) { j += 1; }
+            match blocks(&id, &urls, &key, i, j).await {
+                Ok(_) => { i = j + 1; fails = 0; }
+                Err(_) => { fails += 1; if fails >= 3 { break; } }
+            }
+        }
+        if let Ok(mut w) = warming().lock() { w.retain(|x| *x != id); }
+    });
+}
 
 /// Байты [a, b] файла от сервера (по запасным ссылкам), расшифрованные. → (длина файла, данные с позиции a)
 async fn fetch_run(urls: &[String], key: &Option<Vec<u8>>, a: u64, b: u64) -> Result<(u64, Vec<u8>), FetchErr> {
@@ -353,10 +397,16 @@ async fn serve_inner(id: &str, range: Option<String>) -> Response<Vec<u8>> {
         Some(t) => t,
         None => {
             let first = match asked { Some(Want::From(s, _)) => s / BLOCK, _ => 0 };
-            match blocks(id, &urls, &key, first, first).await { Ok((t, _)) => t, Err(e) => return fail(e) }
+            match blocks(id, &urls, &key, first, first + FIRST_RUN - 1).await {
+                Ok((t, _)) => t,
+                // трек короче 1 МБ — сервер ответил «нет такого куска»: берём один блок
+                Err(FetchErr::NotSatisfiable(_)) => match blocks(id, &urls, &key, first, first).await { Ok((t, _)) => t, Err(e) => return fail(e) },
+                Err(e) => return fail(e),
+            }
         }
     };
     if total == 0 { return resp::not_satisfiable("0"); }
+    prefetch(id, urls.clone(), key.clone(), total);
     // что отдаём: «bytes=a-» — до 2 МБ (плеер попросит дальше сам); «bytes=a-b» — ровно столько, сколько просили
     let (a, b, whole) = match asked {
         None => if total <= chunk { (0, total - 1, true) } else { (0, chunk - 1, false) },
@@ -502,6 +552,29 @@ mod tests {
             }
         });
         let after = crate::lab::hits().lock().unwrap().get("ya-flac-mp4-24-96-fast.enc").copied().unwrap_or(0);
-        assert!(after - before <= 2, "к серверу ушло {} запросов вместо 1–2", after - before);
+        // 1 МБ в начале, хвост и фоновый прогрев остатка (файл 1,4 МБ) — не больше 3 запросов
+        assert!(after - before <= 3, "к серверу ушло {} запросов вместо 1–3", after - before);
+    }
+
+    // прогрев: после первого запроса трек целиком оказывается в памяти, перемотка в любое место — без сервера
+    #[test]
+    fn prefetch_whole_track() {
+        let port = crate::lab::start_server_at(format!("{}/../lab-media", env!("CARGO_MANIFEST_DIR")).into());
+        let plain = std::fs::read(format!("{}/../lab-media/flac-in-mp4.m4a", env!("CARGO_MANIFEST_DIR"))).unwrap();
+        add_as("t-warm".into(), vec![format!("http://127.0.0.1:{port}/ya-flac-mp4-16-44.enc")],
+            Some("00112233445566778899aabbccddeeff".into()), Some("flac-mp4".into()), CHUNK).unwrap();
+        tauri::async_runtime::block_on(async {
+            let _ = serve("t-warm", Some("bytes=0-1".into())).await;
+            let n = (plain.len() as u64).div_ceil(BLOCK);
+            let t0 = Instant::now();
+            // другие тесты тоже прогревают треки (одновременно — не больше 2): если прогрев сняли, запрос плеера запустит его снова
+            while (0..n).any(|i| !has_block("t-warm", i)) && t0.elapsed() < Duration::from_secs(8) {
+                std::thread::sleep(Duration::from_millis(30));
+                let _ = serve("t-warm", Some("bytes=0-1".into())).await;
+            }
+            assert!((0..n).all(|i| has_block("t-warm", i)), "трек не прогрелся");
+            let r = serve("t-warm", Some(format!("bytes=100000-{}", plain.len() - 1))).await;
+            assert_eq!(r.body().as_slice(), &plain[100_000..]);
+        });
     }
 }

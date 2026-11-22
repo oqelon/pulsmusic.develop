@@ -103,20 +103,54 @@ fn env_info(app: tauri::AppHandle) -> serde_json::Value {
     serde_json::json!({ "os": std::env::consts::OS, "osVersion": os_ver, "arch": std::env::consts::ARCH, "app": app.package_info().version.to_string(), "build": option_env!("PULSE_BUILD").unwrap_or("местная"), "tauri": tauri::VERSION })
 }
 
-fn token_get() -> String {
-    keyring::Entry::new(KEY_SERVICE, KEY_USER).and_then(|e| e.get_password()).unwrap_or_default()
+// Запасное место, если Связка ключей не сработала: файл в папке данных этой тестовой программы, доступ только у
+// владельца (0600). Используется, только когда Связка ключей отказала, — и об этом пишется в журнал лаборатории.
+fn token_file(app: &tauri::AppHandle) -> Option<PathBuf> { app.path().app_data_dir().ok().map(|d| d.join("yandex-token")) }
+
+/// → (токен, как прочитали — для журнала)
+fn token_get(app: &tauri::AppHandle) -> (String, String) {
+    match keyring::Entry::new(KEY_SERVICE, KEY_USER).and_then(|e| e.get_password()) {
+        Ok(t) if !t.is_empty() => return (t.clone(), format!("Связка ключей: токен есть (длина {})", t.len())),
+        Ok(_) | Err(keyring::Error::NoEntry) => {}
+        Err(e) => {
+            let f = token_file(app).and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+            let f = f.trim().to_string();
+            return (f.clone(), format!("Связка ключей: ошибка «{e}»; запасной файл: {}", if f.is_empty() { "пусто".to_string() } else { format!("токен есть (длина {})", f.len()) }));
+        }
+    }
+    let f = token_file(app).and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+    let f = f.trim().to_string();
+    if !f.is_empty() { return (f.clone(), format!("Связка ключей: пусто; запасной файл: токен есть (длина {})", f.len())); }
+    (String::new(), "Связка ключей: токена нет".into())
 }
 
-// сохранить токен (пустой — удалить), как secret:set в Electron-версии
+fn write_token_file(app: &tauri::AppHandle, t: &str) -> Result<(), String> {
+    let p = token_file(app).ok_or("нет папки данных")?;
+    if let Some(d) = p.parent() { std::fs::create_dir_all(d).map_err(|e| e.to_string())?; }
+    if t.is_empty() { let _ = std::fs::remove_file(&p); return Ok(()); }
+    std::fs::write(&p, t).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    { use std::os::unix::fs::PermissionsExt; let _ = std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)); }
+    Ok(())
+}
+
+// сохранить токен (пустой — удалить), как secret:set в Electron-версии. → куда сохранилось (для журнала)
 #[tauri::command]
-fn token_set(token: String) -> Result<(), String> {
+fn token_set(app: tauri::AppHandle, token: String) -> Result<String, String> {
     let t = token.trim();
     if t.len() > 4096 { return Err("слишком длинный токен".into()); }
-    let e = keyring::Entry::new(KEY_SERVICE, KEY_USER).map_err(|e| e.to_string())?;
+    let e = keyring::Entry::new(KEY_SERVICE, KEY_USER).map_err(|e| e.to_string());
     if t.is_empty() {
-        match e.delete_credential() { Ok(()) | Err(keyring::Error::NoEntry) => Ok(()), Err(x) => Err(x.to_string()) }
-    } else {
-        e.set_password(t).map_err(|e| e.to_string())
+        if let Ok(e) = &e { let _ = e.delete_credential(); }
+        let _ = write_token_file(&app, "");
+        return Ok("удалён".into());
+    }
+    // в Связку ключей — и сразу проверяем, что читается обратно
+    let kc = e.and_then(|e| { e.set_password(t).map_err(|x| x.to_string())?; e.get_password().map_err(|x| x.to_string()) });
+    match kc {
+        Ok(back) if back == t => { let _ = write_token_file(&app, ""); Ok(format!("Связка ключей (длина {})", t.len())) }
+        Ok(_) => { write_token_file(&app, t)?; Ok("Связка ключей вернула другое значение — сохранён в запасной файл".into()) }
+        Err(x) => { write_token_file(&app, t)?; Ok(format!("Связка ключей: ошибка «{x}» — сохранён в запасной файл")) }
     }
 }
 
@@ -162,7 +196,7 @@ async fn ya_login(app: tauri::AppHandle) -> Result<(), String> {
         .on_navigation(move |u| {
             let Some(t) = token_from_url(u.as_str()) else { return true };
             if done.swap(true, Ordering::SeqCst) { return false; }
-            let saved = token_set(t).is_ok();
+            let saved = token_set(h.clone(), t).is_ok();
             let h2 = h.clone();
             tauri::async_runtime::spawn(async move {
                 if let Some(w) = h2.get_webview_window("login") { let _ = w.close(); }
@@ -184,12 +218,14 @@ async fn open_ui(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(w) = app.get_webview_window("main") { let _ = w.show(); let _ = w.set_focus(); return Ok(()); }
     // токен — один раз в окно при открытии (как preload.js в Electron читал его из зашифрованного хранилища);
     // мост (pulse-bridge.js) забирает его и убирает из window
-    let tok = serde_json::to_string(&token_get()).unwrap_or_else(|_| "\"\"".into());
+    let (t, info) = token_get(&app);
+    let tok = serde_json::to_string(&t).unwrap_or_else(|_| "\"\"".into());
+    let info = serde_json::to_string(&info).unwrap_or_else(|_| "\"\"".into());
     let b = WebviewWindowBuilder::new(&app, "main", WebviewUrl::App("index.html".into()))
         .title("Пульс")
         .inner_size(1440.0, 900.0)
         .min_inner_size(1040.0, 680.0)
-        .initialization_script(format!("window.__PULSE_TOKEN__ = {tok};"));
+        .initialization_script(format!("window.__PULSE_TOKEN__ = {tok}; window.__PULSE_TOKEN_INFO__ = {info};"));
     #[cfg(target_os = "macos")]
     let b = b.title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true);
     b.build().map_err(|e| e.to_string())?;
