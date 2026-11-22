@@ -8,9 +8,10 @@
 // node build.mjs <путь к yandex.js> <папка ui>
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const [, , yaPath, uiDir] = process.argv;
-const here = path.dirname(new URL(import.meta.url).pathname);
+const here = path.dirname(fileURLToPath(import.meta.url));   // fileURLToPath — верный путь и на Windows
 let y = fs.readFileSync(yaPath, 'utf8');
 
 function swap(from, to, count) {
