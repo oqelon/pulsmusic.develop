@@ -191,8 +191,10 @@ pub struct Shared {
     /// журнал сбоев для отчёта
     log: Mutex<VecDeque<String>>,
     /// ПУЛЬС AETHER SOUND: включён ли («ПОСЛЕ») и что он делает сейчас (для окна сравнения)
-    ae_on: AtomicBool,
-    ae_w: AtomicU32, ae_match: AtomicU32, ae_harsh: AtomicU32, ae_lim: AtomicU32,
+    /// 0 — «ДО», 1 — AETHER 1, 2 — AETHER 2
+    ae_mode: AtomicU32,
+    /// доли смеси ×3; в1: громкость, резкость, пики; в2: громкость, нижняя середина, резонансы, сибилянты, пики
+    ae_st: [AtomicU32; 11],
 }
 impl Shared {
     fn new() -> Shared {
@@ -208,8 +210,8 @@ impl Shared {
             out_tx: Mutex::new(None),
             grave: Mutex::new(Vec::new()),
             log: Mutex::new(VecDeque::new()),
-            ae_on: AtomicBool::new(false),
-            ae_w: AtomicU32::new(0), ae_match: AtomicU32::new(0), ae_harsh: AtomicU32::new(0), ae_lim: AtomicU32::new(0),
+            ae_mode: AtomicU32::new(0),
+            ae_st: Default::default(),
         }
     }
     fn note(&self, m: String) {
@@ -339,14 +341,19 @@ impl Engine {
         if let Ok(t) = self.sh.out_tx.lock() { if let Some(t) = t.as_ref() { let _ = t.send(name); } }
     }
     pub fn device_now(&self) -> String { self.sh.device_now.lock().map(|d| d.clone()).unwrap_or_default() }
-    /// ПУЛЬС AETHER SOUND: «ПОСЛЕ» (true) или «ДО» (false). Переключение плавное, звук не прерывается.
-    pub fn set_aether(&self, on: bool) { self.sh.ae_on.store(on, Relaxed); }
+    /// ПУЛЬС AETHER SOUND: 0 — «ДО», 1 — версия 1, 2 — версия 2. Переключение плавное, звук не прерывается.
+    pub fn set_aether(&self, mode: u32) { self.sh.ae_mode.store(mode.min(2), Relaxed); }
     /// Что делает обработка сейчас: доля «ПОСЛЕ» в смеси, выравнивание громкости, смягчение резкости,
     /// самое сильное ослабление пиков с прошлого запроса (дБ).
     pub fn aether_state(&self) -> serde_json::Value {
-        let lim = f32_get(&self.sh.ae_lim); f32_set(&self.sh.ae_lim, 0.0);
-        let r = |x: f32| (x * 100.0).round() / 100.0;
-        serde_json::json!({ "on": self.sh.ae_on.load(Relaxed), "mix": r(f32_get(&self.sh.ae_w)), "match_db": r(f32_get(&self.sh.ae_match)), "harsh_db": r(f32_get(&self.sh.ae_harsh)), "peak_db": r(lim), "rate": self.out_rate() })
+        let st = &self.sh.ae_st;
+        let r = |k: usize| (f32_get(&st[k]) * 100.0).round() / 100.0;
+        let (l1, l2) = (r(5), r(10)); f32_set(&st[5], 0.0); f32_set(&st[10], 0.0);
+        serde_json::json!({
+            "mode": self.sh.ae_mode.load(Relaxed), "mix": [r(0), r(1), r(2)], "rate": self.out_rate(),
+            "v1": { "match_db": r(3), "harsh_db": r(4), "peak_db": l1 },
+            "v2": { "match_db": r(6), "lowmid_db": r(7), "res_db": r(8), "sib_db": r(9), "peak_db": l2 },
+        })
     }
     /// Сбои звука с запуска — для отчёта «Лаборатории».
     pub fn stats(&self) -> serde_json::Value {
@@ -769,12 +776,12 @@ impl Master {
         }
         // ПУЛЬС AETHER SOUND: «ДО» — исходный звук, «ПОСЛЕ» — с обработкой; один источник, плавное смешение
         if self.ae.rate() == rate {
-            self.ae.process(&mut self.mix[..frames * 2], sh.ae_on.load(Relaxed));
-            f32_set(&sh.ae_w, self.ae.w as f32);
-            f32_set(&sh.ae_match, self.ae.match_db() as f32);
-            f32_set(&sh.ae_harsh, self.ae.harsh_db() as f32);
-            let l = self.ae.take_lim_db() as f32;
-            if l < f32_get(&sh.ae_lim) { f32_set(&sh.ae_lim, l); }
+            self.ae.process_mode(&mut self.mix[..frames * 2], sh.ae_mode.load(Relaxed).min(2) as u8);
+            let a = &mut self.ae; let st = &sh.ae_st;
+            for k in 0..3 { f32_set(&st[k], a.mix[k] as f32); }
+            f32_set(&st[3], a.match_db_v(1) as f32); f32_set(&st[4], a.dyn_db(1, 0) as f32);
+            f32_set(&st[6], a.match_db_v(2) as f32); for k in 0..3 { f32_set(&st[7 + k], a.dyn_db(2, k) as f32); }
+            for (v, slot) in [(1usize, 5usize), (2, 10)] { let l = a.take_lim_db_v(v) as f32; if l < f32_get(&st[slot]) { f32_set(&st[slot], l); } }
         }
         // общая шина: предусиление → эквалайзер → лимитер
         let eq = self.p.on && self.p.g.iter().any(|x| x.abs() > 0.01);
@@ -1032,7 +1039,7 @@ mod tests {
         let under0 = ST.underruns.load(Relaxed);
         let t0 = Instant::now();
         for k in 0..280 { // ~3 с по 512 кадров, в темпе реального времени; AETHER «ДО»/«ПОСЛЕ» переключается каждые ~0,2 с
-            if k % 20 == 10 { sh.ae_on.store(!sh.ae_on.load(Relaxed), Relaxed); }
+            if k % 20 == 10 { sh.ae_mode.store((sh.ae_mode.load(Relaxed) + 1) % 3, Relaxed); }
             m.render(&sh, 512, 48000);
             for i in 0..512 {
                 let x = m.mix[i * 2];
