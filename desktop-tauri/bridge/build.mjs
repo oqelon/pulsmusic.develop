@@ -3,7 +3,7 @@
 //   require('crypto')      → PulseShims.crypto (те же md5 / hmac-sha256, синхронно)
 //   require('./yastream')  → регистрация ссылки в программе (Rust, pulseya://)
 //   ys.add(                → await ys.add(   (в Tauri регистрация асинхронная; оба места — внутри async-функций)
-//   fetch                  → tauri-plugin-http (только разрешённые адреса)
+//   fetch                  → tauri-plugin-http через мост (только разрешённые адреса, без Origin — как в Node)
 //   module.exports = api   → return api
 // node build.mjs <путь к yandex.js> <папка ui>
 import fs from 'node:fs';
@@ -26,7 +26,7 @@ if (/require\(/.test(y)) throw new Error('в yandex.js остался require()'
 
 const yandex = `// ---- yandex.js (выпущенный файл, Node-части заменены — см. build.mjs) ----
 var PulseYandex = (function () {
-const fetch = (u, o) => window.__TAURI__.http.fetch(u, o);
+const fetch = (u, o) => window.__PULSE_TAURI__.fetch(u, o);
 ${y}
 })();
 `;

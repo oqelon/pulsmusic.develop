@@ -20,8 +20,38 @@
   var token0 = typeof window.__PULSE_TOKEN__ === 'string' ? window.__PULSE_TOKEN__ : '';
   try { delete window.__PULSE_TOKEN__; } catch (e) { window.__PULSE_TOKEN__ = undefined; }
 
+  // Запросы yandex.js → tauri-plugin-http. Плагин сам добавляет заголовок Origin (tauri://localhost) — в Electron
+  // (Node.js) его не было, и Яндекс на запрос с чужим Origin может ответить отказом. Пустой Origin плагин убирает
+  // (сборка с unsafe-headers) — запрос становится таким же, как из Electron-версии.
+  // Журнал последних запросов (без токена, без адресов с параметрами, без тел) — для раздела «Связь с Яндексом» в
+  // Лаборатории (тот же адрес окна → тот же localStorage).
+  var LOG = 'pulse.tauritest.httplog';
+  function note(e) {
+    try { var l = JSON.parse(localStorage.getItem(LOG) || '[]'); l.push(e); while (l.length > 60) l.shift(); localStorage.setItem(LOG, JSON.stringify(l)); } catch (x) {}
+  }
+  function where(u) { try { var x = new URL(u); return x.origin + x.pathname.replace(/\/[0-9a-f]{20,}/gi, '/…'); } catch (e) { return '?'; } }
+  function hfetch(u, o) {
+    o = o || {};
+    var h = {}; var src = o.headers || {};
+    Object.keys(src).forEach(function (k) { h[k] = src[k]; });
+    h.Origin = '';
+    var t0 = Date.now(), e = { at: new Date().toISOString().slice(11, 19), m: o.method || 'GET', u: where(u), auth: !!h.Authorization, sent: Object.keys(h).filter(function (k) { return k !== 'Authorization'; }).join(',') };
+    return T.http.fetch(u, Object.assign({}, o, { headers: h })).then(function (r) {
+      e.st = r.status; e.ms = Date.now() - t0;
+      // для /account/status — узнал ли Яндекс аккаунт (номер не пишем)
+      if (/\/account\/status$/.test(e.u)) {
+        return r.clone().text().then(function (t) {
+          try { var d = JSON.parse(t); e.uid = !!(d && d.result && d.result.account && d.result.account.uid); e.keys = Object.keys((d && d.result) || d || {}).slice(0, 8).join(','); if (d && d.error) e.err = String(d.error.name || '') + ' ' + String(d.error.message || '').slice(0, 120); } catch (x) { e.err = 'не JSON: ' + t.slice(0, 80); }
+          note(e); return r;
+        });
+      }
+      note(e); return r;
+    }, function (err) { e.ms = Date.now() - t0; e.err = String((err && err.message) || err).slice(0, 200); note(e); throw err; });
+  }
+
   // yandex.js вызывает ys.add({ urls, key, codec }) → адрес pulseya:// (регистрирует программа)
   window.__PULSE_TAURI__ = {
+    fetch: hfetch,
     yaAdd: function (o) { return invoke('ya_add', { urls: [].concat((o && o.urls) || []), key: (o && o.key) || null, codec: (o && o.codec) || null }); },
   };
 

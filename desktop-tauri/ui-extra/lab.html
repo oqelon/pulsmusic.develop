@@ -56,6 +56,13 @@
 </div>
 
 <section>
+  <h2>Этап 4. Связь с Яндексом</h2>
+  <p class="sub">Журнал последних запросов «Пульса» к Яндексу: адрес без параметров, ответ, время. Токена и ваших данных в нём нет — только «был ли токен в запросе» и узнал ли Яндекс аккаунт. Сначала попробуйте войти в «Пульсе», потом нажмите «Обновить».</p>
+  <div class="row"><button class="acc" id="hlRef">Обновить</button><button id="hlClr">Очистить</button><span id="hlSt" class="mute"></span></div>
+  <div class="log" id="hlLog"></div>
+</section>
+
+<section>
   <h2>Этап 3. Звук «Пульса» через Rust</h2>
   <p class="sub">Так «Пульс» будет получать звук: потоки Яндекса (в том числе зашифрованный FLAC, который программа расшифровывает на лету) и свои файлы с диска отдаёт часть программы на Rust. Яндекс здесь подменён маленьким сервером внутри программы — без интернета и без токена. Займёт около минуты.</p>
   <div class="row"><button class="acc" id="runRust">Проверить</button><span id="rustSt" class="mute"></span></div>
@@ -331,6 +338,12 @@
     $('rustSt').textContent = 'Готово: ' + good + ' из ' + R.rust.length + ' играют и совпадают байт в байт. Наведите на значок — будет подробность.';
     btn.disabled = false;
   };
+
+  // ——— этап 4: журнал запросов к Яндексу (пишет мост в окне «Пульса»; общий localStorage)
+  function httpLog() { try { return JSON.parse(localStorage.getItem('pulse.tauritest.httplog') || '[]'); } catch (e) { return []; } }
+  function hlLine(x) { return x.at + ' ' + x.m + ' ' + x.u + ' → ' + (x.st != null ? x.st : 'ошибка') + (x.ms != null ? ' за ' + x.ms + ' мс' : '') + (x.auth ? ' [с токеном]' : '') + (x.uid != null ? ' аккаунт узнан: ' + (x.uid ? 'да' : 'НЕТ') : '') + (x.keys ? ' {' + x.keys + '}' : '') + (x.err ? ' — ' + x.err : '') + (x.sent ? ' (заголовки: ' + x.sent + ')' : ''); }
+  $('hlRef').onclick = function () { var l = httpLog(); $('hlLog').textContent = l.map(hlLine).join('\n'); $('hlSt').textContent = l.length ? 'Запросов: ' + l.length : 'Пусто — «Пульс» ещё не обращался к Яндексу'; };
+  $('hlClr').onclick = function () { try { localStorage.removeItem('pulse.tauritest.httplog'); } catch (e) {} $('hlLog').textContent = ''; $('hlSt').textContent = 'Очищено'; };
 
   // ——— диагностика запуска
   async function startProbe(url) {
@@ -636,6 +649,7 @@
           '; раскодирует: ' + (r.decode ? (r.decode.ok ? 'да, ' + r.decode.sr + ' Гц' : 'НЕТ ' + (r.decode.err || '')) : '—'),
       ].join('\n');
     };
+    var hl = httpLog(); L.push(''); L.push('— ЭТАП 4: ЗАПРОСЫ К ЯНДЕКСУ' + (hl.length ? ' (' + hl.length + ')' : ': пусто')); hl.forEach(function (x) { L.push('   ' + hlLine(x)); });
     L.push(''); L.push('— ДИАГНОСТИКА ЗАПУСКА' + (R.diag.length ? '' : ': не проверяли'));
     R.diag.forEach(function (r) {
       L.push(r.name + ': до звука ' + (r.startMs == null ? 'НЕ заиграл' : r.startMs + ' мс') + '; за 4 с сыграно ' + r.after4 + ' с; остановок ' + r.waits + '; перемотка 50% ' + (r.seekMs == null ? 'НЕТ' : r.seekMs + ' мс') + '; RMS ' + r.rms + (r.err ? '; ошибка ' + r.err : '') + (r.reqs ? '; запросов ' + r.reqs + ', самый долгий ' + r.maxMs + ' мс' : ''));

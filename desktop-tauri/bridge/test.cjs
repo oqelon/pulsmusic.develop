@@ -31,5 +31,8 @@ eval(fs.readFileSync(process.argv[2], 'utf8'));
   await pulse.lyrics('TKN', '123', { title: 't', artist: 'a', dur: 100 });
   for (const c of calls.filter((x) => x[0] === 'fetch')) if (!/^https:\/\/([a-z0-9-]+\.)*yandex\.(net|ru)\//.test(c[1])) assert.ok(!c[2].Authorization, 'токен ушёл не на Яндекс: ' + c[1]);
   const bad = await pulse.chart('TKN'); assert.strictEqual(bad.ok, false);
+  for (const c of calls.filter((x) => x[0] === 'fetch')) assert.strictEqual(c[2].Origin, '', 'Origin должен быть пустым: ' + c[1]);
+  const log = JSON.parse(store['pulse.tauritest.httplog']); const acc = log.find((x) => /account\/status$/.test(x.u));
+  assert.ok(acc && acc.uid === true && acc.st === 200, 'журнал account/status'); assert.ok(!JSON.stringify(log).includes('TKN'), 'токен попал в журнал');
   console.log('мост: все проверки пройдены (' + calls.length + ' вызовов)');
 })().catch((e) => { console.error(e); process.exit(1); });
