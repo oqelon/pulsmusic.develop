@@ -16,6 +16,7 @@ mod engine;
 mod flacw;
 mod lab;
 mod ldb;
+mod library;
 mod localfile;
 mod migrate;
 mod resp;
@@ -317,6 +318,163 @@ fn social_set(app: tauri::AppHandle, patch: serde_json::Value) -> Result<bool, S
     migrate::social_write(&app, &cur).map(|_| true)
 }
 
+// ——— «Своя музыка» (library.rs): библиотека, папки, просмотр, события окну ———
+struct LibState { lib: library::Lib, path: PathBuf, cov: PathBuf, scanning: Option<(usize, usize, String)>, busy: bool, again: bool, sig: u64 }
+static LIB: std::sync::Mutex<Option<LibState>> = std::sync::Mutex::new(None);
+fn lib_emit(app: &tauri::AppHandle, k: &str, v: serde_json::Value) { let _ = tauri::Emitter::emit(app, "pulse-local", serde_json::json!({ "k": k, "v": v })); }
+/// файлы и обложки библиотеки → адреса pulsefile://a/<id> и /c/<id>
+fn lib_register(l: &library::Lib) {
+    let vfs = l.v["vfs"].as_object().cloned().unwrap_or_default();
+    for (id, p) in l.v["files"].as_object().into_iter().flatten() {
+        let Some(p) = p.as_str() else { continue };
+        let src = match vfs.get(p) {
+            Some(v) => localfile::Src::Slice { src: PathBuf::from(v["src"].as_str().unwrap_or("")), off: v["off"].as_u64().unwrap_or(0), size: v["size"].as_u64().unwrap_or(0), wav: v["wav"].as_bool().unwrap_or(false), ext: p.rsplit('.').next().unwrap_or("").to_string() },
+            None => localfile::Src::File(PathBuf::from(p)),
+        };
+        localfile::register(id, src);
+    }
+    for (id, p) in l.v["covers"].as_object().into_iter().flatten() { if let Some(p) = p.as_str() { localfile::register_cover(id, PathBuf::from(p)); } }
+}
+/// подпись содержимого папок (сколько файлов, их даты и размеры) — пересмотр, только если что-то изменилось
+fn lib_sig(roots: &[String]) -> u64 {
+    let mut all = vec![]; for r in roots { library::walk(r, &mut all, 0); }
+    let mut h: u64 = all.len() as u64;
+    for e in &all { h = h.wrapping_mul(1_000_003).wrapping_add(e.s).wrapping_add(e.m as u64).wrapping_add(e.p.len() as u64); }
+    h
+}
+fn lib_start(app: &tauri::AppHandle) {
+    let Ok(dd) = app.path().app_data_dir() else { return };
+    let _ = std::fs::create_dir_all(&dd);
+    let path = dd.join("local-library.json"); let cov = dd.join("local-covers");
+    // первый запуск: библиотека, перенесённая из Electron (этап 5) — те же номера треков, обложки — из копии
+    if !path.exists() {
+        if let Ok(t) = std::fs::read_to_string(dd.join("electron-local-library.json")) {
+            let mut t = t;
+            if let Some(ed) = migrate::electron_dir() {
+                let old = ed.join("local-covers").to_string_lossy().to_string();
+                if dd.join("electron-local-covers").is_dir() && !cov.exists() { let _ = std::fs::rename(dd.join("electron-local-covers"), &cov); }
+                let new = cov.to_string_lossy().to_string();
+                // пути внутри JSON экранированы так же (в путях Mac нет символов, которые JSON экранирует)
+                t = t.replace(&old, &new);
+            }
+            let _ = std::fs::write(&path, t);
+        }
+    }
+    let lib = library::Lib::load(&path);
+    lib_register(&lib);
+    let roots = lib.roots();
+    if let Ok(mut g) = LIB.lock() { *g = Some(LibState { lib, path, cov, scanning: None, busy: false, again: false, sig: 0 }); }
+    lib_emit(app, "changed", serde_json::json!(0));
+    // после запуска — тихо проверяем, не добавилось ли что-то; дальше — раз в минуту по подписи папок
+    let h = app.clone();
+    std::thread::Builder::new().name("pulse-library".into()).spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(2500));
+        if !roots.is_empty() { lib_scan(&h); }
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(60));
+            let (roots, sig) = match LIB.lock() { Ok(g) => match g.as_ref() { Some(s) => (s.lib.roots(), s.sig), None => continue }, Err(_) => continue };
+            if roots.is_empty() { continue; }
+            if lib_sig(&roots) != sig { lib_scan(&h); }
+        }
+    }).ok();
+}
+fn lib_scan(app: &tauri::AppHandle) {
+    {
+        let Ok(mut g) = LIB.lock() else { return }; let Some(s) = g.as_mut() else { return };
+        if s.busy { s.again = true; return; }
+        s.busy = true; s.scanning = Some((0, 0, String::new()));
+    }
+    lib_emit(app, "progress", serde_json::json!({ "done": 0, "total": 0, "name": "" }));
+    loop {
+        // копия данных — просмотр идёт без замка (окно в это время получает прежний список)
+        let (mut lib, cov) = { let g = LIB.lock().unwrap(); let s = g.as_ref().unwrap(); (library::Lib { v: s.lib.v.clone() }, s.cov.clone()) };
+        let roots = lib.roots();
+        let a = app.clone(); let mut last = std::time::Instant::now() - std::time::Duration::from_secs(1);
+        let mut prog = |d: usize, t: usize, n: &str| {
+            if let Ok(mut g) = LIB.lock() { if let Some(s) = g.as_mut() { s.scanning = Some((d, t, n.to_string())); } }
+            if last.elapsed().as_millis() >= 400 { last = std::time::Instant::now(); lib_emit(&a, "progress", serde_json::json!({ "done": d, "total": t, "name": n })); }
+        };
+        let thumb = |src: &std::path::Path, dst: &std::path::Path| -> bool {
+            #[cfg(target_os = "macos")]
+            { std::process::Command::new("/usr/bin/sips").args(["-Z", "400", "-s", "format", "jpeg", "-s", "formatOptions", "86"]).arg(src).arg("--out").arg(dst).output().map(|o| o.status.success() && dst.exists()).unwrap_or(false) }
+            #[cfg(not(target_os = "macos"))]
+            { let _ = (src, dst); false }
+        };
+        let log = |m: String| eprintln!("[pulse] {m}");
+        let mut cx = library::Ctx { cov_dir: cov, progress: &mut prog, thumb: &thumb, log: &log };
+        lib.scan(&mut cx);
+        let sig = lib_sig(&roots);
+        lib_register(&lib);
+        let again = {
+            let mut g = LIB.lock().unwrap(); let s = g.as_mut().unwrap();
+            // пока шёл просмотр, папки могли поменять (добавили/убрали) — берём новый список папок и смотрим ещё раз
+            let changed_roots = s.lib.roots() != roots;
+            let (roots_now, hidden) = (s.lib.v["roots"].clone(), s.lib.v["hidden"].clone());
+            s.lib.v = lib.v; s.lib.v["roots"] = roots_now; s.lib.v["hidden"] = hidden; s.sig = sig;
+            let _ = s.lib.save(&s.path);
+            let ag = s.again || changed_roots; s.again = false;
+            if !ag { s.busy = false; s.scanning = None; }
+            ag
+        };
+        if !again { break; }
+    }
+    lib_emit(app, "progress", serde_json::Value::Null);
+    lib_emit(app, "changed", serde_json::json!(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)));
+}
+fn lib_bg_scan(app: &tauri::AppHandle) { let h = app.clone(); std::thread::spawn(move || lib_scan(&h)); }
+#[tauri::command]
+fn local_list() -> serde_json::Value {
+    match LIB.lock() { Ok(g) => match g.as_ref() { Some(s) => s.lib.list(s.scanning.clone()), None => serde_json::json!({ "roots": [], "tracks": [], "scanning": null, "hidden": 0 }) }, Err(_) => serde_json::json!({ "roots": [], "tracks": [] }) }
+}
+fn lib_add(app: &tauri::AppHandle, paths: Vec<String>) -> usize {
+    let n = { let Ok(mut g) = LIB.lock() else { return 0 }; let Some(s) = g.as_mut() else { return 0 }; let n = s.lib.add_roots(&paths); if n > 0 { let _ = s.lib.save(&s.path); } n };
+    if n > 0 { lib_bg_scan(app); }
+    n
+}
+#[tauri::command]
+async fn local_pick(app: tauri::AppHandle) -> usize {
+    let Some(list) = app.dialog().file().set_title("Папка с музыкой").blocking_pick_folders() else { return 0 };
+    let paths: Vec<String> = list.into_iter().filter_map(|f| f.into_path().ok()).map(|p| p.to_string_lossy().to_string()).collect();
+    lib_add(&app, paths)
+}
+#[tauri::command]
+async fn local_pick_files(app: tauri::AppHandle) -> usize {
+    let mut ext: Vec<&str> = AUDIO_EXT.to_vec(); ext.push("cue");
+    let Some(list) = app.dialog().file().set_title("Файлы с музыкой").add_filter("Музыка", &ext).blocking_pick_files() else { return 0 };
+    let paths: Vec<String> = list.into_iter().take(500).filter_map(|f| f.into_path().ok()).map(|p| p.to_string_lossy().to_string()).collect();
+    lib_add(&app, paths)
+}
+#[tauri::command]
+fn local_add(app: tauri::AppHandle, paths: Vec<String>) -> usize { lib_add(&app, paths.into_iter().take(200).collect()) }
+#[tauri::command]
+fn local_remove(app: tauri::AppHandle, root: String) -> bool {
+    let ch = { let Ok(mut g) = LIB.lock() else { return false }; let Some(s) = g.as_mut() else { return false }; let c = s.lib.remove_root(&root); if c { let _ = s.lib.save(&s.path); } c };
+    if ch { lib_bg_scan(&app); }
+    true
+}
+#[tauri::command]
+fn local_rescan(app: tauri::AppHandle) -> bool { lib_bg_scan(&app); true }
+#[tauri::command]
+fn local_hide(app: tauri::AppHandle, ids: Vec<String>) -> usize {
+    let n = { let Ok(mut g) = LIB.lock() else { return 0 }; let Some(s) = g.as_mut() else { return 0 }; let n = s.lib.hide(&ids); if n > 0 { let _ = s.lib.save(&s.path); } n };
+    if n > 0 { lib_emit(&app, "changed", serde_json::json!(1)); }
+    n
+}
+#[tauri::command]
+fn local_unhide(app: tauri::AppHandle) -> usize {
+    let n = { let Ok(mut g) = LIB.lock() else { return 0 }; let Some(s) = g.as_mut() else { return 0 }; let n = s.lib.v["hidden"].as_array().map(|a| a.len()).unwrap_or(0); s.lib.v["hidden"] = serde_json::json!([]); let _ = s.lib.save(&s.path); n };
+    if n > 0 { lib_bg_scan(&app); }
+    n
+}
+#[tauri::command]
+fn local_reveal(id: String) -> bool {
+    let p = LIB.lock().ok().and_then(|g| g.as_ref().and_then(|s| s.lib.path_of(&id)));
+    let Some(p) = p else { return false };
+    #[cfg(target_os = "macos")] { let _ = std::process::Command::new("/usr/bin/open").arg("-R").arg(&p).spawn(); }
+    #[cfg(target_os = "windows")] { let _ = std::process::Command::new("explorer").arg(format!("/select,{p}")).spawn(); }
+    true
+}
+
 // ——— DSD (dsd.rs): сведения о файле и «Сохранить как FLAC/WAV» (PCM 24 бит) ———
 fn dsd_open(id: &str) -> Result<dsd::Reader, String> {
     let src = localfile::get(id).ok_or("файл больше не в списке")?;
@@ -377,7 +535,7 @@ pub fn run() {
             engine::start(Some(app.handle().clone()));
             // этап 5: перенос данных из Electron-версии — сам при первом запуске (решение владельца)
             let h = app.handle().clone();
-            std::thread::Builder::new().name("pulse-migrate".into()).spawn(move || migrate::auto(&h)).ok();
+            std::thread::Builder::new().name("pulse-migrate".into()).spawn(move || { migrate::auto(&h); lib_start(&h); }).ok();
             Ok(())
         })
         .register_asynchronous_uri_scheme_protocol("pulsetest", |ctx, req, responder| {
@@ -401,7 +559,7 @@ pub fn run() {
                 responder.respond(r);
             });
         })
-        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams, lab_ya_log, lab_ya_log_last, lab_ya_recent, lab_nav_log, dsd_info, dsd_convert, migrate_status, migrate_applied, migrate_restored, migrate_rerun, migrate_restore, social_get, social_set, ya_add, token_set, ya_login, engine_create, engine_drop, engine_open, engine_play, engine_pause, engine_seek, engine_volume, engine_rate, engine_state, engine_eq, engine_tap, engine_info, engine_stats, engine_devices, engine_set_device])
+        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams, lab_ya_log, lab_ya_log_last, lab_ya_recent, lab_nav_log, local_list, local_pick, local_pick_files, local_add, local_remove, local_rescan, local_hide, local_unhide, local_reveal, dsd_info, dsd_convert, migrate_status, migrate_applied, migrate_restored, migrate_rerun, migrate_restore, social_get, social_set, ya_add, token_set, ya_login, engine_create, engine_drop, engine_open, engine_play, engine_pause, engine_seek, engine_volume, engine_rate, engine_state, engine_eq, engine_tap, engine_info, engine_stats, engine_devices, engine_set_device])
         .run(tauri::generate_context!())
         .expect("не удалось запустить Пульс (Tauri)");
 }

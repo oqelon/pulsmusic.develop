@@ -191,6 +191,33 @@
   // аккаунт «Пульса» (друзья, чаты, «Искра»): ключи — в Связке ключей программы (как social.bin в Electron)
   P.socialGet = function () { return invoke('social_get'); };
   P.socialSet = function (p) { return invoke('social_set', { patch: p || {} }); };
+  // своя музыка (library.rs): окно получает список и адреса pulsefile://, не сами пути к файлам
+  var dropAt = 0, dropPaths = [];
+  try {
+    T.event.listen('tauri://drag-drop', function (e) {
+      var ps = (e && e.payload && e.payload.paths) || []; if (!ps.length) return;
+      dropAt = Date.now(); dropPaths = ps;
+      // перетащили музыку или папки на окно — добавляем в «Мою музыку» (как перетаскивание в Electron-версии)
+      invoke('local_add', { paths: ps.slice(0, 200) }).then(function (n) { if (n) enote('local', 'перетащено: добавлено ' + n); }).catch(function (x) { enote('local', 'перетаскивание: ' + x); });
+    });
+  } catch (x) {}
+  var localSubs = { changed: [], progress: [] };
+  try { T.event.listen('pulse-local', function (e) { var p = e && e.payload; if (!p) return; (localSubs[p.k] || []).forEach(function (f) { try { f(p.v); } catch (x) {} }); }); } catch (x) {}
+  var sub = function (k) { return function (cb) { localSubs[k].push(cb); return function () { localSubs[k] = localSubs[k].filter(function (f) { return f !== cb; }); }; }; };
+  P.local = {
+    list: function () { return invoke('local_list'); },
+    pick: function () { return invoke('local_pick'); },
+    pickFiles: function () { return invoke('local_pick_files'); },
+    // перетаскивание: пути приходят от программы (событие tauri://drag-drop) — уже добавлены
+    drop: function () { return Promise.resolve(Date.now() - dropAt < 3000 ? dropPaths.length : 0); },
+    remove: function (root) { return invoke('local_remove', { root: String(root || '') }); },
+    rescan: function () { return invoke('local_rescan'); },
+    hide: function (ids) { return invoke('local_hide', { ids: [].concat(ids || []).map(String) }); },
+    unhide: function () { return invoke('local_unhide'); },
+    reveal: function (id) { return invoke('local_reveal', { id: String(id || '') }); },
+    onChange: sub('changed'),
+    onProgress: sub('progress'),
+  };
   P.saveToken = function (t) { var v = tok(t); if (!tokOk(v)) { enote('token', 'не сохранён: ' + tokShape(v)); return Promise.resolve(false); } return invoke('token_set', { token: v }).then(function (where) { enote('token', 'сохранён: ' + where); return true; }, function (e) { enote('token', 'не сохранён: ' + e); return false; }); };
   P.openExternal = function (u) {
     u = String(u || '');
