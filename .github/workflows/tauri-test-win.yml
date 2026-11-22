@@ -1,0 +1,61 @@
+# Тестовая сборка «Пульса» на Tauri 2 для Windows (перенос Windows на новый движок). Только ветка tauri-migration.
+# Пока — проверка, что всё собирается и проходят проверки; установщик выкладывается как Artifact запуска.
+name: Tauri — тестовая сборка для Windows
+on:
+  workflow_dispatch:
+  push:
+    branches: [tauri-migration]
+    paths: ['desktop-tauri/**', '.github/workflows/tauri-test-win.yml']
+permissions:
+  contents: read
+concurrency: tauri-test-win
+jobs:
+  win-x64:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add x86_64-pc-windows-msvc
+          rustc --version
+          command -v python3 || ln -s "$(command -v python)" /usr/bin/python3 || true
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop-tauri/src-tauri -> target
+      - name: Интерфейс 0.38.0 + лаборатория
+        run: bash desktop-tauri/prepare-ui.sh 0.38.0
+      - name: Проверки моста Яндекса
+        run: node desktop-tauri/bridge/test.cjs desktop-tauri/ui/pulse-bridge.js
+      - name: Проверки Rust (cargo test)
+        working-directory: desktop-tauri/src-tauri
+        run: cargo test --release -- --test-threads=4
+      - name: Сборка
+        working-directory: desktop-tauri
+        env:
+          CI: 'true'
+          PULSE_BUILD: ${{ github.run_number }}
+        run: |
+          node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json','utf8'));const p={name:'pulse',productName:'Пульс',version:c.version,engine:'tauri',build:+process.env.PULSE_BUILD};fs.writeFileSync('app-meta/package.json',JSON.stringify(p,null,2)+'\n')"
+          npx --yes @tauri-apps/cli@2 build --bundles nsis --ci
+      - name: Упаковка
+        run: |
+          B=desktop-tauri/src-tauri/target/release/bundle/nsis
+          ls -la "$B"
+          mkdir -p out && cp "$B"/*.exe out/Pulse-Tauri-Test-Windows-Setup.exe
+          du -sh out/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pulse-tauri-test-win-${{ github.run_number }}
+          path: out/*
+          retention-days: 14
