@@ -717,7 +717,7 @@ pub fn run() {
             engine::start(Some(app.handle().clone()));
             // этап 5: перенос данных из Electron-версии — сам при первом запуске (решение владельца)
             let h = app.handle().clone();
-            std::thread::Builder::new().name("pulse-migrate".into()).spawn(move || { migrate::auto(&h); lib_start(&h); }).ok();
+            std::thread::Builder::new().name("pulse-migrate".into()).spawn(move || { migrate::auto(&h); lib_start(&h); if RELEASE { migrate::remove_electron(&h); } }).ok();
             // этап 6.3: временные файлы прошлой записи CD, Discord, «Сейчас онлайн», батарея
             cd::cleanup_all();
             extras::discord_start(app.handle().clone(), SOCIAL_URL);

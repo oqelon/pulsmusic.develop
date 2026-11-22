@@ -292,6 +292,44 @@ pub fn auto(app: &tauri::AppHandle) {
     if let Err(e) = prepare(app) { let _ = write_private(&md.join("state.json"), &json!({ "status": "error", "error": e }).to_string()); }
 }
 
+/// Выпускная сборка (решение владельца 22.11.2026: «удалить всё, что связано с Electron, сразу при обновлении»):
+/// после того как данные Electron забраны (state.json без ошибки — копия уже лежит в папке Tauri: pending.json,
+/// резервная копия, своя музыка, ключи в Связке), удаляем папку данных Electron, её ключ шифрования в Связке (Mac) и
+/// саму программу Electron на Windows (папка, ярлыки, запись «Установка и удаление программ»). Перенос сорвался —
+/// ничего не удаляем, иначе данные пропали бы насовсем. Один раз: отметка electron-removed в state.json.
+pub fn remove_electron(app: &tauri::AppHandle) {
+    let Ok(md) = mig_dir(app) else { return };
+    let Some(mut st) = read_json(&md.join("state.json")) else { return };
+    if st.get("electron-removed").is_some() || st["status"] == "error" { return; }
+    let mut done: Vec<String> = Vec::new();
+    if let Some(ed) = electron_dir().filter(|d| d.is_dir()) {
+        match std::fs::remove_dir_all(&ed) { Ok(()) => done.push("данные".into()), Err(e) => done.push(format!("данные: {e}")) }
+    }
+    #[cfg(target_os = "macos")]
+    for acct in ["Pulse", "Pulse Key"] {
+        let ok = std::process::Command::new("/usr/bin/security").args(["delete-generic-password", "-s", "Pulse Safe Storage", "-a", acct]).output().map(|o| o.status.success()).unwrap_or(false);
+        if ok { done.push(format!("ключ в Связке ({acct})")); }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let me = std::env::current_exe().ok().and_then(|p| p.canonicalize().ok());
+        if let Some(la) = std::env::var_os("LOCALAPPDATA") {
+            let dir = PathBuf::from(la).join("Programs").join("Pulse");
+            let mine = me.as_ref().map_or(false, |m| dir.canonicalize().map_or(false, |d| m.starts_with(&d)));
+            if dir.join("Pulse.exe").exists() && !mine { match std::fs::remove_dir_all(&dir) { Ok(()) => done.push("программа".into()), Err(e) => done.push(format!("программа: {e}")) } }
+        }
+        let lnk = "Пульс Десктоп Альфа.lnk";
+        let mut places: Vec<PathBuf> = Vec::new();
+        if let Some(a) = std::env::var_os("APPDATA") { let a = PathBuf::from(a); places.push(a.join("Microsoft\\Windows\\Start Menu\\Programs").join(lnk)); places.push(a.join("Microsoft\\Windows\\Start Menu\\Programs\\Startup").join(lnk)); }
+        if let Some(u) = std::env::var_os("USERPROFILE") { places.push(PathBuf::from(u).join("Desktop").join(lnk)); }
+        for p in places { if p.exists() && std::fs::remove_file(&p).is_ok() { done.push(format!("ярлык {}", p.display())); } }
+        let ok = std::process::Command::new("reg").args(["delete", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\PulseDesktopAlpha", "/f"]).output().map(|o| o.status.success()).unwrap_or(false);
+        if ok { done.push("запись в «Установке и удалении программ»".into()); }
+    }
+    st["electron-removed"] = json!({ "at": now_stamp().0, "done": done });
+    let _ = write_private(&md.join("state.json"), &st.to_string());
+}
+
 /// Скрипт для окна «Пульса» (до запуска интерфейса): перенесённые записи или возврат «как было».
 pub fn window_script(app: &tauri::AppHandle) -> String {
     let Ok(md) = mig_dir(app) else { return String::new() };

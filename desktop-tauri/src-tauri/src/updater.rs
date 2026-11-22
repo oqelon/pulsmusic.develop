@@ -73,6 +73,9 @@ pub fn good(msg: &str, sig: &str, key: &str) -> bool {
     vk.verify(msg.as_bytes(), &Signature::from_bytes(&s)).is_ok()
 }
 fn verify_pkg(m: &Value, key: &str) -> bool { !sv(m, "version").is_empty() && hex_ok(&sv(m, "sha256")) && num(m, "size") > 0 && good(&pkg_msg(m), &sv(m, "sig"), key) }
+/// Windows: установщик Tauri-версии (win.json), та же схема подписи с другой меткой
+pub fn win_msg(v: &str, arch: &str, a: &Value) -> String { ["PULSE-WIN-V1", v, arch, &sv(a, "sha256").to_lowercase(), &num(a, "size").to_string()].join("\n") }
+fn verify_win(v: &str, arch: &str, a: &Value, key: &str) -> bool { hex_ok(&sv(a, "sha256")) && num(a, "size") > 0 && good(&win_msg(v, arch, a), &sv(a, "sig"), key) }
 fn verify_mac(v: &str, arch: &str, a: &Value, key: &str) -> bool { hex_ok(&sv(a, "sha256")) && num(a, "size") > 0 && good(&mac_msg(v, arch, a), &sv(a, "sig"), key) }
 
 /// «0.9.10» > «0.9.9»
@@ -127,15 +130,20 @@ async fn feed(test: Option<String>) -> Result<(Value, &'static str), String> {
 
 fn arch() -> &'static str { if cfg!(target_arch = "aarch64") { "arm64" } else { "x64" } }
 
+/// сборка для этой системы: Mac — mac.json (архив Pulse.app), Windows — win.json (установщик)
 async fn mac_entry(m: &Value, key: &str, test: bool) -> Result<Value, String> {
+    let win = cfg!(target_os = "windows");
+    let (file, what) = if win { ("win.json", "Windows") } else { ("mac.json", "Mac") };
+    let wait = format!("Сборка для {what} этой версии ещё готовится — попробуйте через несколько минут");
     let url = sv(m, "url");
     let base = url.rsplit_once('/').map(|x| x.0).ok_or("в ленте нет адреса")?;
     let c = client()?;
-    let j = get_json(&c, &format!("{base}/mac.json"), 15000, "application/json").await.map_err(|_| "Сборка для Mac этой версии ещё готовится — попробуйте через несколько минут".to_string())?;
+    let j = get_json(&c, &format!("{base}/{file}"), 15000, "application/json").await.map_err(|_| wait.clone())?;
     let v = sv(m, "version");
     let a = j[arch()].clone();
-    if sv(&j, "version") != v || !verify_mac(&v, arch(), &a, key) { return Err("Сборка для Mac этой версии ещё готовится — попробуйте через несколько минут".into()); }
-    if !test && !sv(&a, "url").starts_with(PKG_PREFIX) { return Err("Адрес сборки для Mac не похож на релиз «Пульса» — обновление отменено".into()); }
+    let ok = if win { verify_win(&v, arch(), &a, key) } else { verify_mac(&v, arch(), &a, key) };
+    if sv(&j, "version") != v || !ok { return Err(wait); }
+    if !test && !sv(&a, "url").starts_with(PKG_PREFIX) { return Err(format!("Адрес сборки для {what} не похож на релиз «Пульса» — обновление отменено")); }
     Ok(a)
 }
 
@@ -156,9 +164,9 @@ pub async fn check(cur: String) -> Result<Value, String> {
     let mut why = String::new();
     let mut need_installer = false;
     if avail {
-        if cfg!(target_os = "macos") {
+        if cfg!(any(target_os = "macos", target_os = "windows")) {
             match mac_entry(&m, key, is_test).await { Ok(a) => size = num(&a, "size"), Err(e) => { need_installer = true; why = e; } }
-        } else { need_installer = true; why = "Обновление по воздуху для Windows в Tauri-версии ещё не готово".into(); }
+        } else { need_installer = true; why = "Обновление по воздуху на этой системе не поддерживается".into(); }
     }
     let ready = st().staged.as_ref().map_or(false, |s| s.version == sv(&m, "version") && (!is_test || s.build == num(&m, "build")));
     let notes: Vec<Value> = m["notes"].as_array().map(|v| v.iter().take(12).cloned().collect()).unwrap_or_default();
@@ -197,7 +205,7 @@ fn find_app(dir: &Path) -> Option<PathBuf> {
 }
 
 pub async fn prepare(cur: String, progress: impl Fn(f64, &str) + Send + Sync + 'static) -> Result<Value, String> {
-    if !cfg!(target_os = "macos") { return Err("Обновление по воздуху для Windows в Tauri-версии ещё не готово".into()); }
+    if !cfg!(any(target_os = "macos", target_os = "windows")) { return Err("Обновление по воздуху на этой системе не поддерживается".into()); }
     {
         let mut s = st();
         if s.preparing { return Err("Обновление уже скачивается".into()); }
@@ -218,6 +226,18 @@ async fn prepare_inner(cur: String, progress: &(impl Fn(f64, &str) + Send + Sync
     let build = num(&m, "build");
     if let Some(s) = st().staged.as_ref() { if s.version == ver && s.build == build { return Ok(json!({ "version": ver, "engine": true, "admin": s.admin })); } }
     let e = mac_entry(&m, key, is_test).await?;
+    if cfg!(target_os = "windows") {
+        // Windows: установщик во временную папку → после выхода тихо ставится поверх (NSIS /S) и программа открывается снова
+        let work = std::env::temp_dir().join(format!("pulse-update-{ver}"));
+        let _ = std::fs::remove_dir_all(&work);
+        std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
+        let setup = work.join("Pulse-Setup.exe");
+        download_to(&e, &setup, &work, &format!("Скачиваю версию {ver}"), progress).await?;
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        progress(0.96, "Готово");
+        st().staged = Some(Staged { version: ver.clone(), build, from: setup, to: exe, work, admin: false, swapped: false });
+        return Ok(json!({ "version": ver, "engine": true, "admin": false }));
+    }
     let app = app_path()?;
     let parent = app.parent().ok_or("нет папки программы")?.to_path_buf();
     let admin = !writable(&parent) || !writable(&app);
@@ -285,6 +305,49 @@ async fn prepare_inner(cur: String, progress: &(impl Fn(f64, &str) + Send + Sync
     Ok(json!({ "version": sv(&m, "version"), "engine": true, "admin": admin }))
 }
 
+/// скачать файл записи mac.json / win.json, сверив размер и SHA-256 (не сошлось — папка work удаляется)
+async fn download_to(e: &Value, to: &Path, work: &Path, label: &str, progress: &(impl Fn(f64, &str) + Send + Sync)) -> Result<(), String> {
+    progress(0.0, label);
+    let want_size = num(e, "size");
+    let c = client()?;
+    let mut r = None;
+    let mut last = String::new();
+    for _ in 0..2 {
+        match c.get(sv(e, "url")).timeout(std::time::Duration::from_secs(15 * 60)).send().await {
+            Ok(x) if x.status().is_success() => { r = Some(x); break; }
+            Ok(x) => last = format!("ответ {}", x.status().as_u16()),
+            Err(er) => last = er.to_string(),
+        }
+        tokio_sleep(1500).await;
+    }
+    let mut r = r.ok_or_else(|| { let _ = std::fs::remove_dir_all(work); format!("Не получилось скачать обновление ({last})") })?;
+    let mut h = Sha256::new();
+    let mut got: u64 = 0;
+    {
+        use std::io::Write;
+        let mut f = std::io::BufWriter::new(std::fs::File::create(to).map_err(|e| e.to_string())?);
+        loop {
+            match r.chunk().await {
+                Ok(Some(b)) => {
+                    h.update(&b); got += b.len() as u64;
+                    if got > want_size { break; }
+                    f.write_all(&b).map_err(|e| e.to_string())?;
+                    progress((got as f64 / want_size.max(1) as f64 * 0.9).min(0.9), label);
+                }
+                Ok(None) => break,
+                Err(er) => { let _ = std::fs::remove_dir_all(work); return Err(format!("Обновление не докачалось: {er}")); }
+            }
+        }
+        f.flush().map_err(|e| e.to_string())?;
+    }
+    let sum: String = h.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    if got != want_size || sum != sv(e, "sha256").to_lowercase() {
+        let _ = std::fs::remove_dir_all(work);
+        return Err("Обновление скачалось с ошибкой (не совпала контрольная сумма). Попробуйте ещё раз.".into());
+    }
+    Ok(())
+}
+
 async fn tokio_sleep(ms: u64) {
     let _ = tauri::async_runtime::spawn_blocking(move || std::thread::sleep(std::time::Duration::from_millis(ms))).await;
 }
@@ -327,7 +390,23 @@ fn start_swap(s: &Staged, mode: &str) -> Result<(), String> {
             .spawn().map_err(|e| e.to_string())?;
         Ok(())
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        // ждём выхода «Пульса», тихо ставим новую версию поверх и (кроме quiet) открываем её; окна не видно
+        use std::os::windows::process::CommandExt;
+        let q = |p: &Path| p.to_string_lossy().replace('\'', "''");
+        let ps = format!("$p={pid}; for($i=0;$i -lt 300 -and (Get-Process -Id $p -ErrorAction SilentlyContinue);$i++){{Start-Sleep -Milliseconds 100}}; \
+            $r=Start-Process -FilePath '{setup}' -ArgumentList '/S' -Wait -PassThru; \
+            if('{mode}' -ne 'quiet'){{ Start-Process -FilePath '{exe}' }}; \
+            Start-Sleep -Seconds 2; Remove-Item -LiteralPath '{work}' -Recurse -Force -ErrorAction SilentlyContinue",
+            pid = std::process::id(), setup = q(&s.from), exe = q(&s.to), work = q(&s.work), mode = mode);
+        std::process::Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-Command", &ps])
+            .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
+            .creation_flags(0x0800_0000)
+            .spawn().map_err(|e| e.to_string())?;
+        Ok(())
+    }
+    #[cfg(not(any(unix, windows)))]
     { let _ = (s, mode); Err("не поддерживается".into()) }
 }
 
@@ -397,6 +476,14 @@ mod tests {
         let a = json!({ "sha256": "ab".repeat(32), "size": 123, "sig": "yknWvP1Sp0VGiKL0Tp8ax0iAdf0w6Y0jUXdBm9lYyGUdJvUQVh16NfE+r6y231z3HGcwQbFn3CcdE82H7E2EDw==" });
         assert!(verify_mac("0.38.0", "arm64", &a, TEST_KEY));
         assert!(!verify_mac("0.38.0", "arm64", &a, KEY));
+    }
+
+    #[test]
+    fn win_and_mac_signatures_differ() {
+        let a = json!({ "sha256": "ab".repeat(32), "size": 123, "sig": "yknWvP1Sp0VGiKL0Tp8ax0iAdf0w6Y0jUXdBm9lYyGUdJvUQVh16NfE+r6y231z3HGcwQbFn3CcdE82H7E2EDw==" });
+        // подпись, сделанная для Mac, не подходит как подпись установщика Windows
+        assert!(!verify_win("0.38.0", "arm64", &a, TEST_KEY));
+        assert!(win_msg("0.39.0", "x64", &a).starts_with("PULSE-WIN-V1\n0.39.0\nx64\n"));
     }
 
     #[test]
