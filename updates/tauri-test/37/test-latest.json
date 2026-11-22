@@ -1,0 +1,13 @@
+{
+  "version": "0.38.0",
+  "engine": "tauri",
+  "build": 37,
+  "url": "https://raw.githubusercontent.com/oqelon/pulsmusic.develop/tauri-migration/updates/tauri-test/37/test-latest.json",
+  "sha256": "bc67116d04bc547b1c36f3ba9b09c22d2b7119f4f11a0fc119c47e166bf7df08",
+  "size": 33661474,
+  "minElectron": "999.0.0",
+  "notes": [
+    "Тестовая сборка №37"
+  ],
+  "sig": "keEG9AFkJCXeCjiS+lIynkeiAGr8zK2gtp7gW2M6NPxu9xpcHNKkyjsKt9Cb9B452z1lsH5Tu/CZIo+rAmaVAA=="
+}

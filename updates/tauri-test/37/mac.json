@@ -1,0 +1,10 @@
+{
+  "version": "0.38.0",
+  "engine": "tauri",
+  "arm64": {
+    "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/tauri-test-37/Pulse-Tauri-Test-Mac-Apple-M.zip",
+    "sha256": "bc67116d04bc547b1c36f3ba9b09c22d2b7119f4f11a0fc119c47e166bf7df08",
+    "size": 33661474,
+    "sig": "IzbZ7C2jBIc8C1pqCndcu7LaSe2mdTnmg89PPlnSmvY7GT2XqIqM6QfTk72n9FodzEH3o+/Zdb8lBYgP0ssODw=="
+  }
+}

@@ -12,7 +12,9 @@ repo = "oqelon/pulsmusic.develop"
 tag = f"tauri-test-{n}"
 zipname = "Pulse-Tauri-Test-Mac-Apple-M.zip"
 d = tempfile.mkdtemp()
-subprocess.run(["gh", "release", "download", tag, "-R", repo, "-p", zipname, "-D", d], check=True)
+aid = subprocess.run(["gh", "api", f"repos/{repo}/releases/tags/{tag}", "-q", f'.assets[] | select(.name=="{zipname}") | .id'], check=True, capture_output=True, text=True).stdout.strip()
+with open(os.path.join(d, zipname), "wb") as f:
+    subprocess.run(["gh", "api", "-H", "Accept: application/octet-stream", f"repos/{repo}/releases/assets/{aid}"], check=True, stdout=f)
 b = open(os.path.join(d, zipname), "rb").read()
 url = f"https://github.com/{repo}/releases/download/{tag}/{zipname}"
 sha, size, ver = hashlib.sha256(b).hexdigest(), len(b), "0.38.0"
