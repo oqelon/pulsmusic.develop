@@ -120,6 +120,14 @@ pub fn add_as(id: String, urls: Vec<String>, key: Option<String>, codec: Option<
     Ok(format!("pulseya://s/{id}"))
 }
 
+/// Последние зарегистрированные треки Яндекса (не тестовые) → адреса, новые первыми (для опыта с перемоткой).
+pub fn recent(n: usize) -> Vec<String> {
+    let Ok(r) = reg().lock() else { return vec![] };
+    let mut v: Vec<(&String, Instant)> = r.iter().filter(|(k, _)| !k.starts_with("lab-") && !k.starts_with("diag-") && !k.starts_with("t-")).map(|(k, e)| (k, e.t)).collect();
+    v.sort_by(|a, b| b.1.cmp(&a.1));
+    v.into_iter().take(n).map(|(k, _)| format!("pulseya://s/{k}")).collect()
+}
+
 /// Что узнали о звуке по первым байтам (частота, разрядность).
 pub fn fmt_of(url: &str) -> Option<Fmt> {
     let id = url.trim_start_matches("pulseya://s/").trim_start_matches("http://pulseya.localhost/s/");

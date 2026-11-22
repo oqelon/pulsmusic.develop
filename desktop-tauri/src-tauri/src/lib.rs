@@ -172,6 +172,10 @@ fn lab_streams() -> Vec<serde_json::Value> {
 #[tauri::command]
 fn lab_ya_log(id: String) -> Vec<yastream::LogRow> { yastream::log_of(&id) }
 
+// последние треки Яндекса, которые играл «Пульс» (опыт с перемоткой в лаборатории)
+#[tauri::command]
+fn lab_ya_recent() -> Vec<String> { yastream::recent(3) }
+
 // последние запросы плеера ко всем трекам Яндекса (диагностика перемотки)
 #[tauri::command]
 fn lab_ya_log_last() -> Vec<yastream::LogRow> { yastream::log_last(150) }
@@ -267,7 +271,7 @@ pub fn run() {
                 responder.respond(r);
             });
         })
-        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams, lab_ya_log, lab_ya_log_last, ya_add, token_set, ya_login])
+        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams, lab_ya_log, lab_ya_log_last, lab_ya_recent, ya_add, token_set, ya_login])
         .run(tauri::generate_context!())
         .expect("не удалось запустить Пульс (Tauri)");
 }

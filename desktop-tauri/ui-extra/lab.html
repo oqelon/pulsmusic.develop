@@ -56,6 +56,13 @@
 </div>
 
 <section>
+  <h2>Опыт: перемотка трека Яндекса</h2>
+  <p class="sub">Журнал показал: программа отдаёт звук после перемотки мгновенно (из памяти), плеер сообщает «перемотал» через ~50 мс — а звук идёт через секунду. Здесь проверяем, кто держит секунду и помогают ли другие способы. Сначала включите в «Пульсе» любой трек Яндекса и поставьте на паузу, потом нажмите «Проверить». Займёт около минуты, звук тихий.</p>
+  <div class="row"><button class="acc" id="runSeek">Проверить</button><span id="seekSt" class="mute"></span></div>
+  <table id="stbl"><thead><tr><th>Способ</th><th>«Перемотал» (seeked)</th><th>Время пошло</th><th>Звук появился</th><th>Отскок назад</th></tr></thead><tbody></tbody></table>
+</section>
+
+<section>
   <h2>Этап 4. Связь с Яндексом и ошибки окна</h2>
   <p class="sub">Журнал последних запросов «Пульса» к Яндексу: адрес без параметров, ответ, время. Токена и ваших данных в нём нет — только «был ли токен в запросе» и узнал ли Яндекс аккаунт. Сначала попробуйте войти в «Пульсе», потом нажмите «Обновить».</p>
   <div class="row"><button class="acc" id="hlRef">Обновить</button><button id="hlClr">Очистить</button><span id="hlSt" class="mute"></span></div>
@@ -143,7 +150,7 @@
   var $ = function (id) { return document.getElementById(id); };
   var sleep = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
   var started = new Date();
-  var R = { env: null, sys: {}, diag: [], opusLong: null, rust: [], formats: [], user: [], eq: null, vol: null, xf: null, sink: null, bg: null, keys: [], manual: {}, logs: [] };
+  var R = { env: null, sys: {}, seekx: [], diag: [], opusLong: null, rust: [], formats: [], user: [], eq: null, vol: null, xf: null, sink: null, bg: null, keys: [], manual: {}, logs: [] };
 
   var FILES = [
     ['flac-16-44.flac', 'audio/flac', 'FLAC 16/44,1'],
@@ -363,6 +370,67 @@
     $('hlSt').textContent = 'Ошибок: ' + e.length + ', запросов: ' + l.length;
   };
   $('hlClr').onclick = function () { try { localStorage.removeItem('pulse.tauritest.httplog'); localStorage.removeItem('pulse.tauritest.errors'); } catch (e) {} $('hlLog').textContent = ''; $('hlSt').textContent = 'Очищено'; };
+
+  // ——— опыт с перемоткой: настоящий трек Яндекса (уже в памяти программы)
+  async function seekProbe(a, an, target, mode) {
+    var r = { target: +target.toFixed(2) };
+    var t0 = performance.now(), seeked = null, resumed = null, sound = null, minT = 1e9, base = 0;
+    var onS = function () { if (seeked == null) seeked = Math.round(performance.now() - t0); };
+    a.addEventListener('seeked', onS);
+    // перед перемоткой — какой уровень звука «нормальный»
+    var lv = await measure(an, 250); base = lv.avg;
+    t0 = performance.now();
+    if (mode === 'pause') { a.pause(); a.currentTime = target; await new Promise(function (res) { var f = function () { a.removeEventListener('seeked', f); res(); }; a.addEventListener('seeked', f); setTimeout(res, 3000); }); a.play().catch(function () {}); }
+    else if (mode === 'fast' && a.fastSeek) a.fastSeek(target);
+    else a.currentTime = target;
+    var buf = new Float32Array(an.fftSize);
+    while (performance.now() - t0 < 2500) {
+      await sleep(15);
+      var ct = a.currentTime, el = performance.now() - t0;
+      if (seeked != null && el > seeked + 30) minT = Math.min(minT, ct);
+      if (resumed == null && ct > target + 0.05) resumed = Math.round(el);
+      an.getFloatTimeDomainData(buf); var q = 0; for (var i = 0; i < buf.length; i++) q += buf[i] * buf[i]; q = Math.sqrt(q / buf.length);
+      if (sound == null && el > 20 && q > Math.max(0.003, base * 0.3)) sound = Math.round(el);
+    }
+    a.removeEventListener('seeked', onS);
+    r.seeked = seeked; r.resumed = resumed; r.sound = sound; r.back = minT < 1e8 ? +(target - minT).toFixed(2) : null;
+    return r;
+  }
+  $('runSeek').onclick = async function () {
+    var btn = this; btn.disabled = true; stopAll(); var c = getCtx(); R.seekx = [];
+    var tb = document.querySelector('#stbl tbody'); tb.innerHTML = '';
+    var urls = []; try { urls = await invoke('lab_ya_recent'); } catch (e) {}
+    if (!urls.length) { $('seekSt').textContent = 'Сначала включите в «Пульсе» трек Яндекса'; btn.disabled = false; return; }
+    var url = urls[0]; if (WIN) url = url.replace('pulseya://s/', YA);
+    $('seekSt').textContent = 'Готовлю копию трека в памяти окна…';
+    var blobUrl = null;
+    try { var all = await fetchAll(url, 300 * 1024 * 1024); blobUrl = URL.createObjectURL(new Blob([all], { type: 'audio/mp4' })); } catch (e) { $('seekSt').textContent = 'Копия не получилась: ' + e.message; }
+    var ways = [['Как сейчас (pulseya://, перемотка на ходу)', url, 'live'], ['pulseya://, пауза → перемотка → play', url, 'pause'], ['pulseya://, fastSeek', url, 'fast']];
+    if (blobUrl) ways.push(['Весь трек в памяти окна (blob:), перемотка на ходу', blobUrl, 'live']);
+    for (var w = 0; w < ways.length; w++) {
+      var W = ways[w]; $('seekSt').textContent = (w + 1) + ' из ' + ways.length + ': ' + W[0];
+      var a = new Audio(); a.crossOrigin = 'anonymous'; a.preload = 'auto';
+      var src = c.createMediaElementSource(a), an = c.createAnalyser(), g = c.createGain(); an.fftSize = 2048; g.gain.value = 0.15;
+      src.connect(an); an.connect(g); g.connect(c.destination);
+      a.src = W[1];
+      var rows = [];
+      try {
+        await wait(a, 'canplay', 'error', 10000); await a.play(); await sleep(1500);
+        var d = a.duration || 120;
+        for (var k of [0.3, 0.62, 0.18, 0.8]) { rows.push(await seekProbe(a, an, d * k, W[2])); await sleep(700); }
+      } catch (e) { rows.push({ err: e.message }); }
+      a.pause(); try { src.disconnect(); an.disconnect(); g.disconnect(); } catch (e) {} a.removeAttribute('src'); a.load();
+      var avg = function (f) { var v = rows.map(f).filter(function (x) { return x != null; }); return v.length ? Math.round(v.reduce(function (p, x) { return p + x; }, 0) / v.length) : null; };
+      var res = { way: W[0], rows: rows, seeked: avg(function (r) { return r.seeked; }), resumed: avg(function (r) { return r.resumed; }), sound: avg(function (r) { return r.sound; }), back: Math.max.apply(null, rows.map(function (r) { return r.back || 0; })) };
+      R.seekx.push(res);
+      var tr = document.createElement('tr'); var ms = function (v) { return v == null ? '<span class="bad">нет</span>' : v + ' мс'; };
+      tr.innerHTML = '<td>' + W[0] + '</td><td class="c">' + ms(res.seeked) + '</td><td class="c">' + ms(res.resumed) + '</td><td class="c">' + ms(res.sound) + '</td><td class="c ' + (res.back > 0.3 ? 'bad' : 'ok') + '">' + res.back.toFixed(2) + ' с</td>';
+      tb.appendChild(tr);
+    }
+    if (blobUrl) URL.revokeObjectURL(blobUrl);
+    $('seekSt').textContent = 'Готово (среднее по 4 перемоткам; отскок — самый большой).';
+    btn.disabled = false;
+  };
 
   // ——— диагностика запуска
   async function startProbe(url) {
@@ -669,6 +737,8 @@
       ].join('\n');
     };
     var el = errLog(); L.push(''); L.push('— ЭТАП 4: ОКНО «ПУЛЬСА»: ' + aliveLine()); L.push('Ошибки окна (' + el.length + '):'); el.forEach(function (x) { L.push('   ' + x.at + ' [' + x.k + '] ' + x.page + ' — ' + x.m); });
+    L.push(''); L.push('— ОПЫТ: ПЕРЕМОТКА ТРЕКА ЯНДЕКСА' + (R.seekx.length ? '' : ': не проверяли'));
+    R.seekx.forEach(function (x) { L.push(x.way + ': seeked ' + x.seeked + ' мс, время пошло ' + x.resumed + ' мс, звук ' + x.sound + ' мс, отскок до ' + x.back + ' с'); x.rows.forEach(function (r) { L.push('   ' + JSON.stringify(r)); }); });
     L.push(''); L.push('— ЭТАП 4: ПЕРЕМОТКА — ПЛЕЕР И ЗАПРОСЫ (' + lastSeek.length + ', нажмите «Обновить» в разделе «Этап 4» перед отчётом)'); lastSeek.forEach(function (x) { L.push('   ' + x); });
     var hl = httpLog(); L.push(''); L.push('— ЭТАП 4: ЗАПРОСЫ К ЯНДЕКСУ' + (hl.length ? ' (' + hl.length + ')' : ': пусто')); hl.forEach(function (x) { L.push('   ' + hlLine(x)); });
     L.push(''); L.push('— ДИАГНОСТИКА ЗАПУСКА' + (R.diag.length ? '' : ': не проверяли'));
