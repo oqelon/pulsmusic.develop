@@ -6,7 +6,8 @@
 //   громкость, 16 бит, склейка кусков по номерам отсчётов. Для 44,1 кГц / 16 бит звук переходит бит в бит.
 //   Формат, который движок не разжимает (Opus, WebM), отдаётся файлом целиком — как раньше, его разбирает окно.
 // • Запись диска (cd_*): звук уже в формате CD (окно присылает 16 бит стерео кусками) → временная папка → drutil
-//   burn -audio (встроенная утилита macOS). Windows (IMAPI2) в Tauri-версии ещё нет.
+//   burn -audio (встроенная утилита macOS); на Windows — служба записи дисков Windows (IMAPI2) теми же сценариями
+//   PowerShell, что в Electron-версии (cd-ps/*.ps1).
 // • «WAV для CD» (cdw_*): файл пишется во временный «.имя.wav.pulse-part» в выбранной папке, после записи
 //   открывается заново и проверяется (RIFF/WAVE, PCM 16 бит, 44 100 Гц, 2 канала, размер, читается до конца), и
 //   только потом переименовывается. Исходные файлы не трогаются никогда.
@@ -119,8 +120,86 @@ fn mac_status(txt: &str) -> (&'static str, u64) {
     (media, free)
 }
 
+
+// ——————————————————— Windows: служба записи дисков (IMAPI2) через PowerShell — сценарии из burn.js без изменений ———————————————————
+#[cfg(target_os = "windows")]
+const PS_LIST: &str = include_str!("cd-ps/list.ps1");
+#[cfg(target_os = "windows")]
+const PS_BURN: &str = include_str!("cd-ps/burn.ps1");
+#[cfg(target_os = "windows")]
+const PS_EJECT: &str = include_str!("cd-ps/eject.ps1");
+
+#[cfg(target_os = "windows")]
+fn ps(script: &str, env: &[(&str, String)], on_line: &mut dyn FnMut(&str)) -> (i32, Vec<String>, String) {
+    use std::io::BufRead;
+    use std::os::windows::process::CommandExt;
+    let _ = std::fs::create_dir_all(root());
+    let f = root().join(format!("pulse-{}.ps1", rnd_hex(5)));
+    let mut body = vec![0xEF, 0xBB, 0xBF];
+    body.extend_from_slice(script.as_bytes());
+    if let Err(e) = std::fs::write(&f, body) { return (-1, Vec::new(), e.to_string()); }
+    let mut cmd = std::process::Command::new("powershell.exe");
+    cmd.args(["-NoProfile", "-NonInteractive", "-STA", "-ExecutionPolicy", "Bypass", "-File"]).arg(&f)
+        .stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).creation_flags(0x0800_0000);
+    for (k, v) in env { cmd.env(k, v); }
+    let mut ch = match cmd.spawn() { Ok(c) => c, Err(e) => { let _ = std::fs::remove_file(&f); return (-1, Vec::new(), e.to_string()); } };
+    let mut err = ch.stderr.take().unwrap();
+    let et = std::thread::spawn(move || { let mut s = String::new(); let _ = err.read_to_string(&mut s); s });
+    let mut lines = Vec::new();
+    for l in std::io::BufReader::new(ch.stdout.take().unwrap()).split(b'\n').map_while(Result::ok) {
+        let l = String::from_utf8_lossy(&l).trim().trim_start_matches('\u{feff}').to_string();
+        if !l.is_empty() { on_line(&l); lines.push(l); }
+    }
+    let code = ch.wait().map(|s| s.code().unwrap_or(-1)).unwrap_or(-1);
+    let _ = std::fs::remove_file(&f);
+    (code, lines, et.join().unwrap_or_default().trim().to_string())
+}
+#[cfg(target_os = "windows")]
+fn win_drives() -> Value {
+    let (_, lines, _) = ps(PS_LIST, &[], &mut |_| {});
+    let v: Vec<Value> = lines.iter().filter_map(|l| l.strip_prefix("DRIVE|")).map(|l| {
+        let a: Vec<&str> = l.split('|').collect();
+        let g = |i: usize| a.get(i).copied().unwrap_or("");
+        json!({ "id": g(0), "name": if g(1).is_empty() { "Привод" } else { g(1) }, "letter": g(2).trim_end_matches('\\'), "media": g(3), "mins": g(4).parse::<u64>().unwrap_or(0) / 75 / 60 })
+    }).collect();
+    json!({ "ok": true, "drives": v })
+}
+#[cfg(target_os = "windows")]
+fn win_err(code: &str) -> Option<&'static str> {
+    Some(match code {
+        "0xC0AA0202" => "Диск не чистый — вставьте чистый CD-R или CD-RW",
+        "0xC0AA0204" => "В приводе нет диска",
+        "0xC0AA0205" => "Привод не может записать такой диск",
+        "0xC0AA0206" => "Нет доступа к приводу — его занимает другая программа",
+        "0xC0AA0209" => "Диск закончился — треки не поместились",
+        "0xC0AA0405" => "Звука больше, чем помещается на диск",
+        "0xC0AA0210" => "Привод занят другой программой",
+        _ => return None,
+    })
+}
+#[cfg(target_os = "windows")]
+fn win_burn(dir: &Path, o: &Value, speed: u32, emit: &dyn Fn(Value)) -> Result<(), String> {
+    let drive = o["drive"].as_str().unwrap_or("").to_string();
+    let mut err = String::new();
+    let env = [("PULSE_CD_ID", drive), ("PULSE_CD_DIR", dir.to_string_lossy().to_string()), ("PULSE_CD_SPEED", speed.to_string()), ("PULSE_CD_ERASE", if o["erase"].as_bool().unwrap_or(false) { "1".into() } else { "0".into() })];
+    let (code, lines, e2) = ps(PS_BURN, &env, &mut |l| {
+        let a: Vec<&str> = l.split('|').collect();
+        match a[0] {
+            "STAGE" => emit(json!({ "stage": a.get(1).copied().unwrap_or("") })),
+            "TRACK" => emit(json!({ "stage": "write", "track": a.get(1).and_then(|x| x.parse::<u32>().ok()).unwrap_or(0), "n": a.get(2).and_then(|x| x.parse::<u32>().ok()).unwrap_or(0) })),
+            "ERR" => { let c = a.get(1).copied().unwrap_or(""); err = match win_err(c) { Some(m) => m.to_string(), None => format!("{} ({c})", if a.len() > 2 { a[2..].join("|") } else { "Ошибка записи".into() }) }; }
+            _ => {}
+        }
+    });
+    if code != 0 || !lines.iter().any(|l| l == "DONE") { return Err(if !err.is_empty() { err } else if !e2.is_empty() { e2.lines().last().unwrap_or("").to_string() } else { "Не удалось записать диск".into() }); }
+    Ok(())
+}
+
 pub fn drives() -> Value {
-    if !cfg!(target_os = "macos") { return json!({ "ok": false, "err": "Запись дисков в Tauri-версии пока есть только на Mac" }); }
+    #[cfg(target_os = "windows")]
+    { return win_drives(); }
+    #[allow(unreachable_code)]
+    if !cfg!(target_os = "macos") { return json!({ "ok": false, "err": "Запись дисков есть только на Windows и Mac" }); }
     let (code, list) = out("/usr/bin/drutil", &["list"]);
     if code != 0 { return json!({ "ok": true, "drives": [] }); }
     let mut v = Vec::new();
@@ -150,16 +229,19 @@ pub fn put(id: &str, i: u32, data: &[u8], mode: u32) -> Value {
     let mut g = job();
     let Some(j) = g.as_mut().filter(|j| j.id == id) else { return json!({ "ok": false, "err": "Нет задания" }) };
     let name = format!("{:02}", i + 1);
-    let fin = j.dir.join(format!("{name}.wav"));
-    let part = j.dir.join(format!("{name}.wav.part"));
+    // Mac (drutil) берёт WAV, Windows (IMAPI2) — «сырой» звук .pcm без заголовка
+    let (ext, head) = if cfg!(windows) { ("pcm", false) } else { ("wav", true) };
+    let fin = j.dir.join(format!("{name}.{ext}"));
+    let part = j.dir.join(format!("{name}.{ext}.part"));
+    let hdr = |n: u64| -> Vec<u8> { if head { wav_header(n, 2, RATE, 16, 1).to_vec() } else { Vec::new() } };
     let r = (|| -> Result<Value, String> {
         if mode == 0 {
             if data.is_empty() || data.len() % 2352 != 0 { return Ok(json!({ "ok": false, "err": "Неверный размер" })); }
             let mut f = File::create(&fin).map_err(|e| e.to_string())?;
-            f.write_all(&wav_header(data.len() as u64, 2, RATE, 16, 1)).and_then(|_| f.write_all(data)).map_err(|e| e.to_string())?;
+            f.write_all(&hdr(data.len() as u64)).and_then(|_| f.write_all(data)).map_err(|e| e.to_string())?;
             return Ok(json!({ "ok": true }));
         }
-        if !j.parts.contains_key(&i) { std::fs::write(&part, wav_header(0, 2, RATE, 16, 1)).map_err(|e| e.to_string())?; j.parts.insert(i, 0); }
+        if !j.parts.contains_key(&i) { std::fs::write(&part, hdr(0)).map_err(|e| e.to_string())?; j.parts.insert(i, 0); }
         if !data.is_empty() {
             let mut f = std::fs::OpenOptions::new().append(true).open(&part).map_err(|e| e.to_string())?;
             f.write_all(data).map_err(|e| e.to_string())?;
@@ -168,9 +250,10 @@ pub fn put(id: &str, i: u32, data: &[u8], mode: u32) -> Value {
         if mode == 2 {
             let n = j.parts.remove(&i).unwrap_or(0);
             if n == 0 || n % 2352 != 0 { let _ = std::fs::remove_file(&part); return Ok(json!({ "ok": false, "err": "Неверный размер" })); }
-            let mut f = std::fs::OpenOptions::new().write(true).open(&part).map_err(|e| e.to_string())?;
-            f.seek(SeekFrom::Start(0)).and_then(|_| f.write_all(&wav_header(n, 2, RATE, 16, 1))).map_err(|e| e.to_string())?;
-            drop(f);
+            if head {
+                let mut f = std::fs::OpenOptions::new().write(true).open(&part).map_err(|e| e.to_string())?;
+                f.seek(SeekFrom::Start(0)).and_then(|_| f.write_all(&hdr(n))).map_err(|e| e.to_string())?;
+            }
             std::fs::rename(&part, &fin).map_err(|e| e.to_string())?;
         }
         Ok(json!({ "ok": true }))
@@ -180,7 +263,7 @@ pub fn put(id: &str, i: u32, data: &[u8], mode: u32) -> Value {
 
 /// запись: drutil burn -audio (прогресс — через emit)
 pub fn burn(id: &str, o: &Value, emit: &dyn Fn(Value)) -> Value {
-    if !cfg!(target_os = "macos") { return json!({ "ok": false, "err": "Запись дисков в Tauri-версии пока есть только на Mac" }); }
+    if !cfg!(any(target_os = "macos", target_os = "windows")) { return json!({ "ok": false, "err": "Запись дисков есть только на Windows и Mac" }); }
     let (dir, n) = {
         let mut g = job();
         let Some(j) = g.as_mut().filter(|j| j.id == id) else { return json!({ "ok": false, "err": "Нет задания" }) };
@@ -190,6 +273,15 @@ pub fn burn(id: &str, o: &Value, emit: &dyn Fn(Value)) -> Value {
     };
     let speed = o["speed"].as_f64().unwrap_or(0.0).clamp(0.0, 52.0) as u32;
     let drive = match &o["drive"] { Value::String(s) if !s.is_empty() => s.clone(), Value::Number(x) => x.to_string(), _ => "1".into() };
+    #[cfg(target_os = "windows")]
+    {
+        let _ = &drive;
+        emit(json!({ "stage": "prepare" }));
+        let r = win_burn(&dir, o, speed, emit);
+        cleanup();
+        return match r { Ok(()) => json!({ "ok": true }), Err(e) => json!({ "ok": false, "err": e }) };
+    }
+    #[allow(unreachable_code)]
     let mut args: Vec<String> = vec!["-drive".into(), drive, "burn".into(), "-audio".into(), "-noverify".into()];
     if speed > 0 { args.push("-speed".into()); args.push(format!("{speed}x")); }
     if o["erase"].as_bool().unwrap_or(false) { args.push("-erase".into()); }
@@ -235,6 +327,9 @@ fn last_pct(t: &str) -> Option<u32> {
 }
 
 pub fn eject(drive: &str) -> bool {
+    #[cfg(target_os = "windows")]
+    { let (_, l, _) = ps(PS_EJECT, &[("PULSE_CD_ID", drive.to_string())], &mut |_| {}); return l.iter().any(|x| x == "DONE"); }
+    #[allow(unreachable_code)]
     if !cfg!(target_os = "macos") { return false; }
     let d = if drive.is_empty() { "1" } else { drive };
     out("/usr/bin/drutil", &["-drive", d, "eject"]).0 == 0

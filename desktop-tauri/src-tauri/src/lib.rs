@@ -678,6 +678,7 @@ fn cdw_reveal(p: String) -> bool {
     let pb = PathBuf::from(&p);
     if !pb.is_absolute() { return false; }
     #[cfg(target_os = "macos")] { let mut c = std::process::Command::new("/usr/bin/open"); if p.to_lowercase().ends_with(".wav") { c.arg("-R"); } let _ = c.arg(&pb).spawn(); }
+    #[cfg(target_os = "windows")] { let _ = if p.to_lowercase().ends_with(".wav") { std::process::Command::new("explorer").arg(format!("/select,{p}")).spawn() } else { std::process::Command::new("explorer").arg(&pb).spawn() }; }
     true
 }
 
