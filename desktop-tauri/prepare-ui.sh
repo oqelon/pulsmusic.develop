@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Готовит папку ui/ для тестовой сборки на Tauri:
-#  • интерфейс «Пульса» берётся из уже выпущенного обновления (updates/<версия>/pulse-app-<версия>.zip, папка dist/) —
-#    тот же самый, что у пользователей Electron-версии, без изменений;
+#  • интерфейс «Пульса» — app-dist.zip: собран из исходников 0.38.0 с правками только для Tauri (они включаются,
+#    когда есть window.__TAURI__; в Electron-версии ничего не меняется). Без него — выпущенный dist из updates/<версия>;
 #  • рядом кладётся «Лаборатория звука» (ui-extra/lab.html) и мост window.pulse (bridge/, этап 4);
 #  • в копии index.html к правилам безопасности (CSP) добавляется тестовая схема pulsetest:, иначе WebView не пустит
 #    звук демо-треков. Исходники приложения при этом не меняются.
@@ -12,7 +12,9 @@ ZIP="../updates/$VER/pulse-app-$VER.zip"
 [ -f "$ZIP" ] || { echo "нет $ZIP"; exit 1; }
 rm -rf ui && mkdir -p ui
 TMP="$(mktemp -d)"
-unzip -q "$ZIP" 'dist/*' yandex.js -d "$TMP"
+unzip -q "$ZIP" yandex.js -d "$TMP"
+# интерфейс: собранный для Tauri (app-dist.zip — из исходников с правками только для Tauri), иначе — выпущенный
+if [ -f app-dist.zip ]; then unzip -q app-dist.zip 'dist/*' -d "$TMP"; echo "интерфейс: app-dist.zip (сборка для Tauri)"; else unzip -q "$ZIP" 'dist/*' -d "$TMP"; echo "интерфейс: $ZIP"; fi
 cp -R "$TMP/dist/." ui/
 cp ui-extra/lab.html ui/lab.html
 # этап 4: мост window.pulse для Tauri (тот же yandex.js из этого выпуска, запросы через tauri-plugin-http)
