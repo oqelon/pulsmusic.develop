@@ -63,9 +63,9 @@
 </section>
 
 <section>
-  <h2>DSD: .dsf и .dff</h2>
-  <p class="sub">Выберите DSD-файлы (SACD-рипы, Hi-Res). «Пульс» сам переводит DSD в PCM 88,2 кГц (фильтр с подавлением ≥ 100 дБ, ровно до 24 кГц) и играет через свой звуковой движок. «Сохранить как FLAC / WAV» — PCM 24 бит 88,2 кГц. Своя музыка в Tauri-версии подключается на этапе 6 — до этого DSD проверяем здесь.</p>
-  <div class="row"><button class="acc" id="dsdPick">Выбрать DSD-файлы</button><span id="dsdSt" class="mute"></span></div>
+  <h2>DSD, APE и WavPack</h2>
+  <p class="sub">Выберите файлы .dsf, .dff, .ape или .wv. DSD (SACD-рипы, Hi-Res) «Пульс» сам переводит в PCM 88,2 кГц (фильтр с подавлением ≥ 100 дБ, ровно до 24 кГц); «Сохранить как FLAC / WAV» — PCM 24 бит 88,2 кГц. APE и WavPack разжимает свой декодер программы (побитно как ffmpeg). Всё играет через свой звуковой движок. Те же файлы можно добавить и в «Свою музыку» в самом «Пульсе».</p>
+  <div class="row"><button class="acc" id="dsdPick">Выбрать файлы</button><span id="dsdSt" class="mute"></span></div>
   <div id="dsdList"></div>
 </section>
 
@@ -809,8 +809,8 @@
       ].join('\n');
     };
     L.push(''); L.push('— ЭТАП 5: ПЕРЕНОС ДАННЫХ ИЗ ELECTRON'); L.push(mgText(R.mig));
-    L.push(''); L.push('— DSD' + (R.dsd.length ? '' : ': не проверяли'));
-    R.dsd.forEach(function (f) { L.push(f.name + ': ' + (f.info ? f.info.kind + ' ' + f.info.grade + ', ' + f.info.channels + ' кан., ' + fmtT(f.info.duration) : 'не открылся') + '; играл: ' + (f.played ? 'да' : '—') + (f.err ? '; ошибка: ' + f.err : '') + (f.flac ? '; FLAC: ' + f.flac : '') + (f.wav ? '; WAV: ' + f.wav : '')); });
+    L.push(''); L.push('— DSD, APE, WavPack' + (R.dsd.length ? '' : ': не проверяли'));
+    R.dsd.forEach(function (f) { L.push(f.name + ': ' + (f.info ? f.info.kind + ' ' + (f.pack ? (f.info.level ? 'ур. ' + f.info.level + ' ' : '') + f.info.rate + ' Гц ' + (f.info.float ? 'float' : f.info.bits + ' бит') : f.info.grade) + ', ' + f.info.channels + ' кан., ' + fmtT(f.info.duration) : 'не открылся') + '; играл: ' + (f.played ? 'да' : '—') + (f.err ? '; ошибка: ' + f.err : '') + (f.flac ? '; FLAC: ' + f.flac : '') + (f.wav ? '; WAV: ' + f.wav : '')); });
     var E = R.engine; L.push(''); L.push('— ЗВУКОВОЙ ДВИЖОК: СБОИ С ЗАПУСКА' + (E ? '' : ': нет данных (' + (R.engineErr || 'движок не запущен') + ')'));
     if (E) {
       L.push('Вывод: ' + (E.device || '—') + ', ' + E.rate + ' Гц, кусок ' + E.cb_frames + ' кадров, самый долгий расчёт ' + E.cb_max_ms + ' мс, запас ' + E.ahead_s + ' с');
@@ -867,14 +867,19 @@
   }
   $('dsdPick').onclick = async function () {
     var list = await invoke('pick_files').catch(function (e) { $('dsdSt').textContent = 'Ошибка: ' + e; return []; });
-    list = list.filter(function (f) { return /\.(dsf|dff)$/i.test(f.name); });
-    if (!list.length) { $('dsdSt').textContent = 'DSD-файлов (.dsf, .dff) не выбрано'; return; }
+    list = list.filter(function (f) { return /\.(dsf|dff|ape|wv)$/i.test(f.name); });
+    if (!list.length) { $('dsdSt').textContent = 'Файлов .dsf, .dff, .ape, .wv не выбрано'; return; }
     $('dsdSt').textContent = '';
     for (const f of list) {
       var row = document.createElement('div'); row.className = 'log'; row.style.marginTop = '10px';
       row.innerHTML = '<b></b> <span class="dinfo mute"></span><div class="row" style="margin-top:8px"><button class="acc dp">Играть</button><button class="dpa">Пауза</button><input type="range" min="0" max="1000" value="0" style="flex:1;min-width:200px"><span class="dpos mute"></span></div><div class="row"><button class="dflac">Сохранить как FLAC</button><button class="dwav">Сохранить как WAV</button><span class="dconv mute"></span></div>';
       row.querySelector('b').textContent = f.name; $('dsdList').appendChild(row);
-      try { f.info = await invoke('dsd_info', { id: f.id }); row.querySelector('.dinfo').textContent = f.info.kind + ' · ' + f.info.grade + ' (' + (f.info.fs / 1e6).toFixed(4) + ' МГц) · ' + f.info.channels + ' кан. · ' + fmtT(f.info.duration) + ' → PCM ' + (f.info.outRate / 1000) + ' кГц'; }
+      f.pack = /\.(ape|wv)$/i.test(f.name);
+      if (f.pack) row.querySelector('.dflac').parentNode.style.display = 'none';
+      try {
+        if (f.pack) { f.info = await invoke('pack_info', { id: f.id }); row.querySelector('.dinfo').textContent = f.info.kind + (f.info.level ? ' (уровень ' + f.info.level + ')' : '') + ' · ' + (f.info.rate / 1000) + ' кГц · ' + (f.info.float ? '32 бит float' : f.info.bits + ' бит') + ' · ' + f.info.channels + ' кан. · ' + fmtT(f.info.duration) + (f.info.lossy ? ' · гибридный (с потерями)' : ''); }
+        else { f.info = await invoke('dsd_info', { id: f.id }); row.querySelector('.dinfo').textContent = f.info.kind + ' · ' + f.info.grade + ' (' + (f.info.fs / 1e6).toFixed(4) + ' МГц) · ' + f.info.channels + ' кан. · ' + fmtT(f.info.duration) + ' → PCM ' + (f.info.outRate / 1000) + ' кГц'; }
+      }
       catch (e) { f.err = String(e); row.querySelector('.dinfo').textContent = 'Не открылся: ' + e; }
       R.dsd.push(f);
       (function (f, row) {

@@ -11,6 +11,7 @@
 // CD, Discord, обновления (этап 6). Данные этой сборки хранятся отдельно (ru.pulse.desktop.tauritest) — обычный
 // «Пульс» на Electron, его настройки, лайки и токен она не видит и не трогает.
 
+mod apewv;
 mod dsd;
 mod engine;
 mod flacw;
@@ -486,6 +487,15 @@ fn dsd_info(id: String) -> Result<serde_json::Value, String> {
     let r = dsd_open(&id)?; let i = &r.info;
     Ok(serde_json::json!({ "kind": i.kind, "grade": i.grade(), "fs": i.fs, "channels": i.channels, "duration": i.duration(), "outRate": i.out_rate }))
 }
+/// APE и WavPack: формат и длительность (лаборатория)
+#[tauri::command]
+fn pack_info(id: String) -> Result<serde_json::Value, String> {
+    let src = localfile::get(&id).ok_or("файл больше не в списке")?;
+    let o = localfile::Opened::open(&src).map_err(|e| e.to_string())?;
+    let r = apewv::Reader::open(Box::new(localfile::Reader::new(o)))?;
+    let i = &r.info;
+    Ok(serde_json::json!({ "kind": i.codec, "rate": i.rate, "bits": i.bits, "float": i.float, "channels": i.channels, "duration": i.duration(), "lossy": i.lossy, "level": i.level }))
+}
 #[tauri::command]
 async fn dsd_convert(app: tauri::AppHandle, id: String, fmt: String) -> Result<Option<String>, String> {
     let fmt = if fmt == "wav" { "wav" } else { "flac" };
@@ -559,7 +569,7 @@ pub fn run() {
                 responder.respond(r);
             });
         })
-        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams, lab_ya_log, lab_ya_log_last, lab_ya_recent, lab_nav_log, local_list, local_pick, local_pick_files, local_add, local_remove, local_rescan, local_hide, local_unhide, local_reveal, dsd_info, dsd_convert, migrate_status, migrate_applied, migrate_restored, migrate_rerun, migrate_restore, social_get, social_set, ya_add, token_set, ya_login, engine_create, engine_drop, engine_open, engine_play, engine_pause, engine_seek, engine_volume, engine_rate, engine_state, engine_eq, engine_tap, engine_info, engine_stats, engine_devices, engine_set_device])
+        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams, lab_ya_log, lab_ya_log_last, lab_ya_recent, lab_nav_log, local_list, local_pick, local_pick_files, local_add, local_remove, local_rescan, local_hide, local_unhide, local_reveal, dsd_info, pack_info, dsd_convert, migrate_status, migrate_applied, migrate_restored, migrate_rerun, migrate_restore, social_get, social_set, ya_add, token_set, ya_login, engine_create, engine_drop, engine_open, engine_play, engine_pause, engine_seek, engine_volume, engine_rate, engine_state, engine_eq, engine_tap, engine_info, engine_stats, engine_devices, engine_set_device])
         .run(tauri::generate_context!())
         .expect("не удалось запустить Пульс (Tauri)");
 }

@@ -440,10 +440,12 @@ fn open_source(url: &str) -> Result<(Box<dyn MediaSource>, Hint), (String, Strin
 
 // ——————————————————————————— декодер ———————————————————————————
 
-/// откуда берётся PCM: Symphonia (MP3, AAC, FLAC, ALAC, WAV, OGG, AIFF…) или свой декодер DSD (dsd.rs)
+/// откуда берётся PCM: Symphonia (MP3, AAC, FLAC, ALAC, WAV, OGG, AIFF…), свой декодер DSD (dsd.rs)
+/// или свои декодеры APE и WavPack (apewv.rs)
 enum Body {
     Sym { format: Box<dyn FormatReader>, dec: Box<dyn Decoder>, track_id: u32, tb: Option<TimeBase> },
     Dsd(crate::dsd::Reader),
+    Pack(crate::apewv::Reader),
 }
 enum Next { Pcm(Vec<f32>, Vec<f32>), Skip, Eof, Err(String, String) }
 
@@ -458,19 +460,32 @@ struct Track {
     bad: u64,
 }
 
-fn is_dsd(url: &str) -> Option<String> {
+/// Свой файл, который играет свой декодер: (номер, расширение) — dsf/dff (DSD), ape/wv (APE, WavPack)
+fn own_file(url: &str) -> Option<(String, String)> {
     let u = url.split('#').next().unwrap_or(url);
     let id = ["pulsefile://a/", "http://pulsefile.localhost/a/"].iter().find_map(|p| u.strip_prefix(p))?.split(['/', '?']).next()?.to_string();
-    match crate::localfile::get(&id)? { crate::localfile::Src::File(p) if matches!(p.extension().map(|e| e.to_string_lossy().to_lowercase()).as_deref(), Some("dsf") | Some("dff")) => Some(id), _ => None }
+    let ext = match crate::localfile::get(&id)? {
+        crate::localfile::Src::File(p) => p.extension()?.to_string_lossy().to_lowercase(),
+        crate::localfile::Src::Slice { ext, wav: false, .. } => ext.trim_start_matches('.').to_lowercase(),
+        _ => return None,
+    };
+    matches!(ext.as_str(), "dsf" | "dff" | "ape" | "wv").then_some((id, ext))
 }
 
 fn open_track(url: &str) -> Result<(Track, f64), (String, String)> {
-    if let Some(id) = is_dsd(url) {
+    if let Some((id, ext)) = own_file(url) {
         let src = crate::localfile::get(&id).ok_or_else(|| ("missing".to_string(), "файл больше не в списке".to_string()))?;
         let o = crate::localfile::Opened::open(&src).map_err(|e| ("missing".to_string(), e.to_string()))?;
-        let r = crate::dsd::Reader::open(Box::new(LocalSource { o, pos: 0 })).map_err(|e| ("unsupported".to_string(), format!("DSD: {e}")))?;
-        let (sr, dur) = (r.out_rate(), r.info.duration());
-        return Ok((Track { body: Body::Dsd(r), sr, skip_until: None, rs: None, pend: [Vec::new(), Vec::new()], good: 0, bad: 0 }, dur));
+        let (body, sr, dur) = if ext == "dsf" || ext == "dff" {
+            let r = crate::dsd::Reader::open(Box::new(LocalSource { o, pos: 0 })).map_err(|e| ("unsupported".to_string(), format!("DSD: {e}")))?;
+            let (sr, dur) = (r.out_rate(), r.info.duration());
+            (Body::Dsd(r), sr, dur)
+        } else {
+            let r = crate::apewv::Reader::open(Box::new(LocalSource { o, pos: 0 })).map_err(|e| ("unsupported".to_string(), e))?;
+            let (sr, dur) = (r.info.rate, r.duration());
+            (Body::Pack(r), sr, dur)
+        };
+        return Ok((Track { body, sr, skip_until: None, rs: None, pend: [Vec::new(), Vec::new()], good: 0, bad: 0 }, dur));
     }
     let (src, hint) = open_source(url)?;
     let mss = MediaSourceStream::new(src, Default::default());
@@ -534,6 +549,7 @@ impl Track {
     fn seek_to(&mut self, t: f64) -> Result<(), String> {
         let r = match &mut self.body {
             Body::Dsd(d) => d.seek(t).map(|_| None),
+            Body::Pack(d) => d.seek(t).map(|_| None),
             Body::Sym { format, dec, track_id, .. } => {
                 let to = SeekTo::Time { time: Time::from(t.max(0.0)), track_id: Some(*track_id) };
                 match format.seek(SeekMode::Accurate, to) {
@@ -553,6 +569,7 @@ impl Track {
     fn next_pcm(&mut self) -> Next {
         let (format, dec, track_id, tb) = match &mut self.body {
             Body::Dsd(d) => return match d.next(4096) { Ok(Some((l, r))) => { self.good += 1; Next::Pcm(l, r) } Ok(None) => Next::Eof, Err(e) => Next::Err("decode".into(), e) },
+            Body::Pack(d) => return match d.next(4096) { Ok(Some((l, r))) => { self.good += 1; Next::Pcm(l, r) } Ok(None) => Next::Eof, Err(e) => Next::Err("decode".into(), e) },
             Body::Sym { format, dec, track_id, tb } => (format, dec, *track_id, *tb),
         };
         let pkt = match format.next_packet() {
@@ -1083,6 +1100,27 @@ mod tests {
         let Next::Pcm(l, _) = t.next_pcm() else { panic!("после перемотки нет звука") };
         assert!((l[100] - all[44100 + 100]).abs() < 1e-3, "перемотка не туда");
         let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn ape_and_wavpack_play_through_engine_track() {
+        let lab = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../lab-media");
+        for (name, rate) in [("ape-s16-5000-3990.ape", 44100u32), ("wv-s16.wv", 44100)] {
+            let id = format!("eng-{name}");
+            crate::localfile::register(&id, crate::localfile::Src::File(lab.join(name)));
+            let (mut t, dur) = open_track(&format!("pulsefile://a/{id}")).map_err(|(k, m)| format!("{k}: {m}")).unwrap();
+            assert_eq!(t.sr, rate, "{name}");
+            let rf = std::fs::read(lab.join(name.rsplit_once('.').unwrap().0.to_string() + ".ref.raw")).unwrap();
+            let want: Vec<f32> = rf.chunks(4).map(|c| i16::from_le_bytes([c[0], c[1]]) as f32 / 32768.0).collect();
+            assert!((dur - want.len() as f64 / rate as f64).abs() < 1e-6, "{name}: длительность {dur}");
+            let mut all = Vec::new();
+            loop { match t.next_pcm() { Next::Pcm(l, _) => all.extend(l), Next::Eof => break, Next::Skip => {} Next::Err(k, m) => panic!("{name}: {k}: {m}") } }
+            assert_eq!(all, want, "{name}: звук не совпадает с эталоном");
+            t.seek_to(0.75).unwrap();
+            let Next::Pcm(l, _) = t.next_pcm() else { panic!("{name}: после перемотки нет звука") };
+            let at = (0.75 * rate as f64).round() as usize;
+            assert_eq!(&l[..64], &want[at..at + 64], "{name}: перемотка не туда");
+        }
     }
 
     #[test]

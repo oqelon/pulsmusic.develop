@@ -1,7 +1,7 @@
 [[permission]]
 identifier = "allow-lab"
 description = "Команды тестового окна «Лаборатория звука»: выбрать свои файлы, сохранить отчёт, сведения о системе, открыть интерфейс с демо-данными, тестовые потоки, формат звука Яндекса."
-commands.allow = ["pick_files", "save_report", "env_info", "open_ui", "ya_fmt", "lab_streams", "lab_ya_log", "lab_ya_log_last", "lab_ya_recent", "lab_nav_log", "dsd_info", "dsd_convert", "engine_create", "engine_drop", "engine_open", "engine_play", "engine_pause", "engine_seek", "engine_state", "engine_stats", "migrate_status", "migrate_rerun", "migrate_restore"]
+commands.allow = ["pick_files", "save_report", "env_info", "open_ui", "ya_fmt", "lab_streams", "lab_ya_log", "lab_ya_log_last", "lab_ya_recent", "lab_nav_log", "dsd_info", "pack_info", "dsd_convert", "engine_create", "engine_drop", "engine_open", "engine_play", "engine_pause", "engine_seek", "engine_state", "engine_stats", "migrate_status", "migrate_rerun", "migrate_restore"]
 
 [[permission]]
 identifier = "allow-player"
