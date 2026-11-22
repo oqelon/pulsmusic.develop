@@ -95,6 +95,7 @@ fn set_state(s: &str, emit: &dyn Fn(&str)) {
 fn discord_loop(rx: Receiver<Cmd>, emit: Box<dyn Fn(&str) + Send>) {
     let (mut enabled, mut app_id, mut want, mut legacy) = (false, String::new(), Value::Null, false);
     let mut sock: Option<Sock> = None;
+    let mut rx_data: Option<Receiver<Option<Vec<u8>>>> = None;
     let (mut ready, mut buf) = (false, Vec::<u8>::new());
     let mut next_try = Instant::now();
     let mut send_at: Option<Instant> = None;
@@ -108,7 +109,10 @@ fn discord_loop(rx: Receiver<Cmd>, emit: Box<dyn Fn(&str) + Send>) {
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return,
         }
-        let drop_sock = |sock: &mut Option<Sock>, ready: &mut bool, buf: &mut Vec<u8>, last: &mut String| { *sock = None; *ready = false; buf.clear(); last.clear(); };
+        let drop_sock = |sock: &mut Option<Sock>, ready: &mut bool, buf: &mut Vec<u8>, last: &mut String| {
+            #[cfg(unix)] { if let Some(s) = sock.as_ref() { let _ = s.shutdown(std::net::Shutdown::Both); } }
+            *sock = None; *ready = false; buf.clear(); last.clear();
+        };
         // выключили — убираем статус и отключаемся
         if !enabled && sock.is_some() && send_at.is_none() { drop_sock(&mut sock, &mut ready, &mut buf, &mut last_sent); }
         if sock.is_none() {
@@ -117,7 +121,15 @@ fn discord_loop(rx: Receiver<Cmd>, emit: Box<dyn Fn(&str) + Send>) {
             if Instant::now() < next_try { continue; }
             match connect_pipe() {
                 Some(mut s) => {
-                    #[cfg(unix)] { let _ = s.set_read_timeout(Some(Duration::from_millis(50))); }
+                    // чтение — в своём потоке (на Windows канал Discord нельзя читать «с таймаутом»): куски — через канал
+                    let (rtx, rrx) = channel::<Option<Vec<u8>>>();
+                    if let Ok(mut rd) = s.try_clone() {
+                        let _ = std::thread::Builder::new().name("pulse-discord-read".into()).spawn(move || {
+                            let mut tmp = [0u8; 8192];
+                            loop { match rd.read(&mut tmp) { Ok(0) | Err(_) => { let _ = rtx.send(None); return; } Ok(k) => { if rtx.send(Some(tmp[..k].to_vec())).is_err() { return; } } } }
+                        });
+                    }
+                    rx_data = Some(rrx);
                     if s.write_all(&frame(0, &json!({ "v": 1, "client_id": app_id }))).is_ok() { sock = Some(s); set_state("wait", &*emit); }
                     else { next_try = Instant::now() + Duration::from_secs(20); set_state("wait", &*emit); }
                 }
@@ -126,13 +138,10 @@ fn discord_loop(rx: Receiver<Cmd>, emit: Box<dyn Fn(&str) + Send>) {
         }
         // чтение ответов Discord
         let mut closed = false;
-        if let Some(s) = sock.as_mut() {
-            let mut tmp = [0u8; 8192];
-            match s.read(&mut tmp) {
-                Ok(0) => closed = true,
-                Ok(k) => buf.extend_from_slice(&tmp[..k]),
-                Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {}
-                Err(_) => closed = true,
+        if sock.is_some() {
+            match rx_data.as_ref() {
+                Some(r) => loop { match r.try_recv() { Ok(Some(b)) => buf.extend_from_slice(&b), Ok(None) => { closed = true; break; } Err(std::sync::mpsc::TryRecvError::Empty) => break, Err(_) => { closed = true; break; } } },
+                None => closed = true,
             }
         }
         while buf.len() >= 8 && !closed {
@@ -307,12 +316,25 @@ pub fn perf_unsafe(data: &std::path::Path) { let mut m = memo(data); for k in ["
 fn ram_gb() -> u64 {
     #[cfg(target_os = "macos")]
     { if let Ok(o) = std::process::Command::new("/usr/sbin/sysctl").args(["-n", "hw.memsize"]).output() { if let Ok(b) = String::from_utf8_lossy(&o.stdout).trim().parse::<u64>() { return (b as f64 / 1_073_741_824.0).round() as u64; } } }
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+        let mut m: MEMORYSTATUSEX = unsafe { std::mem::zeroed() };
+        m.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
+        if unsafe { GlobalMemoryStatusEx(&mut m) } != 0 { return (m.ullTotalPhys as f64 / 1_073_741_824.0).round() as u64; }
+    }
     0
 }
-/// от батареи? (macOS: pmset -g batt → «Now drawing from 'Battery Power'»)
+/// от батареи? (macOS: pmset -g batt → «Now drawing from 'Battery Power'»; Windows: GetSystemPowerStatus)
 pub fn on_battery() -> bool {
     #[cfg(target_os = "macos")]
     { if let Ok(o) = std::process::Command::new("/usr/bin/pmset").args(["-g", "batt"]).output() { return String::from_utf8_lossy(&o.stdout).contains("'Battery Power'"); } }
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
+        let mut p: SYSTEM_POWER_STATUS = unsafe { std::mem::zeroed() };
+        if unsafe { GetSystemPowerStatus(&mut p) } != 0 { return p.ACLineStatus == 0; }
+    }
     false
 }
 pub fn perf(data: &std::path::Path) -> Value {
