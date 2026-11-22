@@ -1,0 +1,16 @@
+{
+  "version": "0.39.0",
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.39.0/pulse-app-0.39.0.zip",
+  "sha256": "eb6b618e20b54a3ffc8770fa6be5c350a90c357b2997baf489124a09fa1b31f0",
+  "size": 1155191,
+  "minElectron": "33.2.1",
+  "date": "2026-11-23",
+  "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
+  "notes": [
+    "Новая версия «Пульса»: свой звуковой движок — быстрее и легче",
+    "Новая карточка исполнителя: фото во всю шапку, «Об исполнителе» — отдельной кнопкой",
+    "Лайки, плейлисты, история, вход и ключи друзей переносятся сами"
+  ],
+  "online": "https://pulse-online.pulsmusic.workers.dev",
+  "sig": "Tw/5eMMdL5QjWNBfPV3oTsECottgRmifRzJXbeczmKccn3t2rNqbr+ix/DBG6CNDnO8JceOfd+zT1cF4L2beDg=="
+}
