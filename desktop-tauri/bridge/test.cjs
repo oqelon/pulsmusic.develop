@@ -18,6 +18,7 @@ global.__TAURI__ = { core: { invoke: async (c, a) => { calls.push(['invoke', c, 
     if (u.startsWith('https://lrclib.net')) return new Response('[]', { status: 200 });
     return new Response('{"error":{"message":"нет"}}', { status: 404 }); } } };
 global.__PULSE_TOKEN__ = 'TKN';
+global.addEventListener = () => {}; global.location = { hash: '#/home', pathname: '/' }; global.document = { body: null }; global.setInterval = () => 0;
 eval(fs.readFileSync(process.argv[2], 'utf8'));
 (async () => {
   assert.strictEqual(pulse.initialToken, 'TKN'); assert.strictEqual(typeof global.__PULSE_TOKEN__, 'undefined');
@@ -34,5 +35,8 @@ eval(fs.readFileSync(process.argv[2], 'utf8'));
   for (const c of calls.filter((x) => x[0] === 'fetch')) assert.strictEqual(c[2].Origin, '', 'Origin должен быть пустым: ' + c[1]);
   const log = JSON.parse(store['pulse.tauritest.httplog']); const acc = log.find((x) => /account\/status$/.test(x.u));
   assert.ok(acc && acc.uid === true && acc.st === 200, 'журнал account/status'); assert.ok(!JSON.stringify(log).includes('TKN'), 'токен попал в журнал');
+  console.error(new Error('проба OAuth y0_SECRET'));
+  const el = JSON.parse(store['pulse.tauritest.errors']); assert.ok(el.some((x) => x.k === 'console' && x.m.includes('[токен]') && !x.m.includes('SECRET')), 'журнал ошибок прячет токен');
+  assert.strictEqual(typeof (await pulse.version()), 'string');
   console.log('мост: все проверки пройдены (' + calls.length + ' вызовов)');
 })().catch((e) => { console.error(e); process.exit(1); });

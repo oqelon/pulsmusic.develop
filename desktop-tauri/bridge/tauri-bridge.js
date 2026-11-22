@@ -6,6 +6,24 @@
 (function () {
   'use strict';
   if (window.pulse) return;
+  // ——— журнал ошибок окна (для Лаборатории, раздел «Этап 4»): ошибки JS, отклонённые обещания, console.error
+  // и «пульс» окна раз в секунду — если окно почернело, а ошибок нет, значит упал сам процесс WebKit.
+  var ELOG = 'pulse.tauritest.errors';
+  function enote(kind, msg) {
+    try {
+      var l = JSON.parse(localStorage.getItem(ELOG) || '[]');
+      l.push({ at: new Date().toISOString().slice(11, 19), k: kind, m: String(msg || '').replace(/y0_[\w-]+|OAuth [\w-]+/g, '[токен]').slice(0, 1200), page: location.hash || location.pathname });
+      while (l.length > 80) l.shift();
+      localStorage.setItem(ELOG, JSON.stringify(l));
+    } catch (x) {}
+  }
+  try { enote('start', 'окно открыто, ' + navigator.userAgent); } catch (x) {}
+  window.addEventListener('error', function (e) { enote('error', (e.message || '') + ' @ ' + (e.filename || '').split('/').pop() + ':' + e.lineno + ':' + e.colno + (e.error && e.error.stack ? '\n' + e.error.stack : '')); });
+  window.addEventListener('unhandledrejection', function (e) { var r = e.reason; enote('promise', (r && (r.stack || r.message)) || r); });
+  var cerr = console.error.bind(console);
+  console.error = function () { try { enote('console', Array.prototype.map.call(arguments, function (a) { return a && a.stack ? a.stack : typeof a === 'object' ? (function () { try { return JSON.stringify(a); } catch (x) { return String(a); } })() : String(a); }).join(' ')); } catch (x) {} cerr.apply(null, arguments); };
+  setInterval(function () { try { localStorage.setItem('pulse.tauritest.alive', JSON.stringify({ t: Date.now(), page: location.hash || location.pathname, nodes: document.body ? document.body.getElementsByTagName('*').length : 0 })); } catch (x) {} }, 1000);
+
   var T = window.__TAURI__;
   if (!T || !T.core) { console.error('[pulse] нет связи с программой (__TAURI__)'); return; }
   var invoke = T.core.invoke;
@@ -68,7 +86,8 @@
 
   var win = function () { return T.window && T.window.getCurrentWindow ? T.window.getCurrentWindow() : null; };
   P.platform = MAC ? 'darwin' : WIN ? 'win32' : 'linux';
-  P.version = '0.38.0-tauri-test';
+  // как app:version в Electron — функция, возвращающая обещание (Program.jsx вызывает window.pulse.version())
+  P.version = function () { return Promise.resolve('0.38.0-tauri-test'); };
   P.initialToken = token0;
   P.saveToken = function (t) { return invoke('token_set', { token: String(t || '') }); };
   P.openExternal = function (u) {
