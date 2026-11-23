@@ -21,7 +21,7 @@ $rec = New-Object -ComObject IMAPI2.MsftDiscRecorder2
 ok ($rec | Get-Member -Name EjectMedia) 'Recorder: EjectMedia'
 # два «трека»: 3 с и 2,5 с тишины/тона, длина кратна сектору 2352
 $d = Join-Path $env:TEMP ('pulse-cd-probe-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $d | Out-Null
-$lens = 225, 188
+$lens = 375, 338   # по стандарту трек не короче 4 с (300 секторов)
 for ($k = 0; $k -lt 2; $k++) { $b = New-Object byte[] ($lens[$k] * 2352); for ($i = 0; $i -lt $b.Length; $i += 4) { $v = [int](8000 * [math]::Sin($i / 4 * 2 * [math]::PI * 440 / 44100)); $b[$i] = $v -band 255; $b[$i + 1] = ($v -shr 8) -band 255; $b[$i + 2] = $b[$i]; $b[$i + 3] = $b[$i + 1] }; [IO.File]::WriteAllBytes((Join-Path $d ('{0:D2}.pcm' -f ($k + 1))), $b) }
 foreach ($st in 2, 3, 1) {
   try {
@@ -29,7 +29,7 @@ foreach ($st in 2, 3, 1) {
     foreach ($f in (Get-ChildItem -LiteralPath $d -Filter '*.pcm' | Sort-Object Name)) { $s = [PulseCdStream]::Open($f.FullName); [void]$img.AddTrack(0, $s) }
     $res = $img.CreateResultImage()
     ok ($null -ne $res) ('RawCD ' + $st + ': образ собран; треков ' + $img.NumberOfExistingTracks + ', начало выводной зоны ' + $img.StartOfLeadout + ' сект.')
-    ok (@(413, 563) -contains [int]$img.StartOfLeadout) ('RawCD ' + $st + ': треки подряд, без пауз между ними (выводная зона с ' + $img.StartOfLeadout + ')')
+    ok (@(563, 713) -contains [int]$img.StartOfLeadout) ('RawCD ' + $st + ': треки подряд, без пауз между ними (выводная зона с ' + $img.StartOfLeadout + ')')
   } catch { Write-Output ('FAIL RawCD вид ' + $st + ': ' + $_.Exception.Message); $fail++ }
 }
 Remove-Item -Recurse -Force $d

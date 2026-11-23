@@ -9,7 +9,8 @@ foreach ($id in $dm) {
     $letter = ''; if ($r.VolumePathNames) { $letter = [string]($r.VolumePathNames | Select-Object -First 1) }
     $media = 'none'; $free = 0; $speeds = ''; $max = 0
     # «без пауз» и паузы короче 2 с — только запись «диск за один проход» (DAO, IMAPI2 RawCD)
-    $sao = 0; try { $raw = New-Object -ComObject IMAPI2.MsftDiscFormat2RawCD; if ($raw.IsRecorderSupported($r)) { $sao = 1 } } catch { }
+    # 0.46: пока выключено — сборка образа RawCD на проверке CI не прошла; паузы 2 с и длиннее пишутся «трек за треком»
+    $sao = 0
     $d = New-Object -ComObject IMAPI2.MsftDiscFormat2Data
     if (-not $d.IsRecorderSupported($r)) { $media = 'nowrite' }
     elseif ($d.IsCurrentMediaSupported($r)) {
