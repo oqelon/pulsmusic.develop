@@ -365,13 +365,16 @@ fn social_get(app: tauri::AppHandle) -> serde_json::Value {
 }
 #[tauri::command]
 fn social_set(app: tauri::AppHandle, patch: serde_json::Value) -> Result<bool, String> {
-    let mut cur = migrate::social_read(&app);
+    let mut cur = migrate::social_try_read(&app)?;   // не прочиталось — не пишем: иначе затёрли бы ключ друзей
     if !cur.is_object() { cur = serde_json::json!({}); }
-    for k in ["session", "key", "devId", "me"] {
+    for k in ["session", "key", "devId", "me", "old"] {
         if let Some(s) = patch.get(k).and_then(|x| x.as_str()) { if s.len() < 200_000 { cur[k] = serde_json::json!(s); } }
     }
     migrate::social_write(&app, &cur).map(|_| true)
 }
+/// 0.44.1 прежние ключи переписки этого компьютера — «Открыть старые сообщения» в чате
+#[tauri::command(async)]
+fn social_old(app: tauri::AppHandle) -> serde_json::Value { migrate::social_old(&app) }
 
 // ——— «Своя музыка» (library.rs): библиотека, папки, просмотр, события окну ———
 struct LibState { lib: library::Lib, path: PathBuf, cov: PathBuf, scanning: Option<(usize, usize, String)>, busy: bool, again: bool, sig: u64 }
@@ -750,7 +753,7 @@ pub fn run() {
                 responder.respond(r);
             });
         })
-        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams, lab_ya_log, lab_ya_log_last, lab_ya_recent, lab_nav_log, local_list, local_pick, local_pick_files, local_add, local_remove, local_rescan, local_hide, local_unhide, local_reveal, dsd_info, pack_info, dsd_convert, migrate_status, migrate_applied, migrate_restored, migrate_rerun, migrate_restore, social_get, social_set, ya_add, token_set, ya_login, engine_create, engine_drop, engine_open, engine_play, engine_pause, engine_seek, engine_volume, engine_rate, engine_state, engine_eq, engine_tap, engine_info, engine_stats, engine_devices, engine_set_device, upd_check, upd_prepare, upd_install, upd_restart, upd_ready, upd_test_feed, cd_piece, cd_drives, cd_begin, cd_put, cd_burn, cd_eject, cd_cancel, cdw_pick_files, cdw_pick_folder, cdw_add_paths, cdw_pick_out, cdw_open, cdw_write, cdw_finish, cdw_abort, cdw_reveal, discord_enable, discord_set, discord_state, online_get, dev_unlock, dev_devtools, perf_info, perf_slow, perf_unsafe, perf_relaunch, audio_cors, app_version])
+        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams, lab_ya_log, lab_ya_log_last, lab_ya_recent, lab_nav_log, local_list, local_pick, local_pick_files, local_add, local_remove, local_rescan, local_hide, local_unhide, local_reveal, dsd_info, pack_info, dsd_convert, migrate_status, migrate_applied, migrate_restored, migrate_rerun, migrate_restore, social_get, social_set, social_old, ya_add, token_set, ya_login, engine_create, engine_drop, engine_open, engine_play, engine_pause, engine_seek, engine_volume, engine_rate, engine_state, engine_eq, engine_tap, engine_info, engine_stats, engine_devices, engine_set_device, upd_check, upd_prepare, upd_install, upd_restart, upd_ready, upd_test_feed, cd_piece, cd_drives, cd_begin, cd_put, cd_burn, cd_eject, cd_cancel, cdw_pick_files, cdw_pick_folder, cdw_add_paths, cdw_pick_out, cdw_open, cdw_write, cdw_finish, cdw_abort, cdw_reveal, discord_enable, discord_set, discord_state, online_get, dev_unlock, dev_devtools, perf_info, perf_slow, perf_unsafe, perf_relaunch, audio_cors, app_version])
         .build(tauri::generate_context!())
         .expect("не удалось запустить Пульс (Tauri)")
         .run(|app, ev| match ev {

@@ -191,6 +191,8 @@
   // аккаунт «Пульса» (друзья, чаты, «Искра»): ключи — в Связке ключей программы (как social.bin в Electron)
   P.socialGet = function () { return invoke('social_get'); };
   P.socialSet = function (p) { return invoke('social_set', { patch: p || {} }); };
+  // 0.44.1 прежние ключи этого компьютера — открыть старые сообщения (на Mac может спросить пароль Связки ключей)
+  P.socialOld = function () { return invoke('social_old'); };
   // своя музыка (library.rs): окно получает список и адреса pulsefile://, не сами пути к файлам
   var dropAt = 0, dropPaths = [];
   try {

@@ -34,6 +34,13 @@ fn kc_read(user: &str) -> Result<Option<String>, String> {
     }
 }
 
+/// 0.44.1 запись прежних версий прямо из Связки ключей (Mac; может спросить пароль) — только чтобы открыть старую
+/// переписку по нажатию. На Windows хранилище и так прежнее — отдельной старой записи нет.
+#[cfg(target_os = "macos")]
+pub fn legacy(user: &str) -> Result<Option<String>, String> { kc_read(user) }
+#[cfg(not(target_os = "macos"))]
+pub fn legacy(_user: &str) -> Result<Option<String>, String> { Ok(None) }
+
 #[cfg(not(target_os = "macos"))]
 pub fn get(user: &str) -> Result<Option<String>, String> { kc_read(user) }
 

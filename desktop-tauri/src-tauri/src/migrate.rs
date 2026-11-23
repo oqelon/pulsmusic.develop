@@ -165,6 +165,41 @@ pub fn social_read(app: &tauri::AppHandle) -> Value {
     let s = kc_get("social").or_else(|| social_file(app).and_then(|p| std::fs::read_to_string(p).ok())).unwrap_or_default();
     serde_json::from_str(&s).unwrap_or_else(|_| json!({}))
 }
+/// 0.44.1 то же, но ошибка хранилища — ошибка, а не пустой аккаунт: social_set не должен затирать ключи друзей,
+/// если их сейчас не удалось прочитать (раньше пустой ответ + запись = новый ключ поверх прежнего)
+pub fn social_try_read(app: &tauri::AppHandle) -> Result<Value, String> {
+    let s = match crate::secrets::get("social") {
+        Ok(Some(s)) => s,
+        Ok(None) => social_file(app).and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default(),
+        Err(e) => return Err(format!("ключи друзей сейчас не читаются ({}: {e})", crate::secrets::place())),
+    };
+    Ok(serde_json::from_str(&s).unwrap_or_else(|_| json!({})))
+}
+
+/// 0.44.1 прежние ключи переписки этого компьютера (каждый — { key, devId, from }), кроме нынешнего: запись до
+/// переноса, Связка ключей прежних версий (Mac, может спросить пароль), social.bin обычного «Пульса» и его копии
+/// при переносе (расшифровка — ключом Electron из Связки ключей, тоже может спросить). Только по нажатию в чате.
+pub fn social_old(app: &tauri::AppHandle) -> Value {
+    let cur_dev = social_read(app)["devId"].as_str().unwrap_or("").to_string();
+    let mut out: Vec<Value> = Vec::new();
+    let mut errs: Vec<String> = Vec::new();
+    fn add(s: &str, from: &str, cur: &str, out: &mut Vec<Value>) {
+        let Ok(v) = serde_json::from_str::<Value>(s) else { return };
+        let (Some(k), Some(d)) = (v["key"].as_str(), v["devId"].as_str()) else { return };
+        if k.is_empty() || d.is_empty() || d == cur || out.iter().any(|o| o["devId"] == d) { return; }
+        out.push(json!({ "key": k, "devId": d, "from": from }));
+    }
+    if let Some(s) = kc_get("social.before-import") { add(&s, "до переноса", &cur_dev, &mut out); }
+    match crate::secrets::legacy("social") { Ok(Some(s)) => add(&s, "прежние версии", &cur_dev, &mut out), Ok(None) => {}, Err(e) => errs.push(format!("Связка ключей: {e}")) }
+    let mut files: Vec<PathBuf> = Vec::new();
+    if let Some(d) = electron_dir() { files.push(d.join("social.bin")); }
+    if let Ok(md) = mig_dir(app) { if let Ok(rd) = std::fs::read_dir(&md) { for e in rd.flatten() { if e.file_name().to_string_lossy().starts_with("backup-") { files.push(e.path().join("electron").join("social.bin")); } } } }
+    let mut key: Option<Result<Vec<u8>, String>> = None;
+    for f in files.iter().filter(|f| f.exists()) {
+        match read_secret_file(f, &mut key) { Ok(Some(s)) => add(&s, "обычный «Пульс»", &cur_dev, &mut out), Ok(None) => {}, Err(e) => { if !errs.contains(&e) { errs.push(e); } } }
+    }
+    json!({ "keys": out, "errs": errs })
+}
 pub fn social_write(app: &tauri::AppHandle, v: &Value) -> Result<String, String> {
     let s = v.to_string();
     match kc_set("social", &s) {
