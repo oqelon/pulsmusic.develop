@@ -330,7 +330,11 @@
         '.pulse-cap button{width:46px;height:40px;border:0;margin:0;padding:0;background:transparent;color:#c7c7cc;font:10px "Segoe Fluent Icons","Segoe MDL2 Assets";display:flex;align-items:center;justify-content:center;cursor:default;outline:none;transition:background-color .1s}' +
         '.pulse-cap button:hover{background:rgba(255,255,255,.0605);color:#fff}.pulse-cap button:active{background:rgba(255,255,255,.0419)}' +
         '.pulse-cap button.x:hover{background:#c42b1c;color:#fff}.pulse-cap button.x:active{background:#c83c31}' +
-        'html.pulse-fs .pulse-cap{display:none}';
+        'html.pulse-fs .pulse-cap{display:none}' +
+        // 0.45 белая тема: кнопки окна сами подстраиваются под то, что под ними (белый фон — тёмные, фото исполнителя — светлые);
+        // при наведении на «закрыть» — обычный красный
+        'html.mkl .pulse-cap{mix-blend-mode:difference}html.mkl .pulse-cap button{color:#fff}' +
+        'html.mkl .pulse-cap:has(.x:hover){mix-blend-mode:normal}';
       document.head.appendChild(css);
       var box = document.createElement('div'); box.className = 'pulse-cap';
       var mk = function (glyph, title, cls, fn) { var b = document.createElement('button'); b.type = 'button'; b.textContent = glyph; b.title = title; if (cls) b.className = cls; b.addEventListener('click', function (e) { e.stopPropagation(); fn(); }); box.appendChild(b); return b; };
