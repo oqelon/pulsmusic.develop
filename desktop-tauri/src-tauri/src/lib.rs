@@ -106,7 +106,7 @@ async fn save_report(app: tauri::AppHandle, text: String) -> Result<bool, String
     Ok(true)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn env_info(app: tauri::AppHandle) -> serde_json::Value {
     let mut os_ver = String::new();
     #[cfg(target_os = "macos")]
@@ -151,7 +151,7 @@ fn write_token_file(app: &tauri::AppHandle, t: &str) -> Result<(), String> {
 }
 
 // сохранить токен (пустой — удалить), как secret:set в Electron-версии. → куда сохранилось (для журнала)
-#[tauri::command]
+#[tauri::command(async)]
 fn token_set(app: tauri::AppHandle, token: String) -> Result<String, String> {
     let t = token.trim();
     if t.len() > 4096 { return Err("слишком длинный токен".into()); }
@@ -335,7 +335,7 @@ async fn reopen_ui(app: tauri::AppHandle) -> Result<(), String> {
     let _ = tauri::async_runtime::spawn_blocking(|| std::thread::sleep(std::time::Duration::from_millis(300))).await;
     open_ui(app).await
 }
-#[tauri::command] fn migrate_status(app: tauri::AppHandle) -> serde_json::Value { migrate::status(&app) }
+#[tauri::command(async)] fn migrate_status(app: tauri::AppHandle) -> serde_json::Value { migrate::status(&app) }
 #[tauri::command] fn migrate_applied(app: tauri::AppHandle, stamp: String, before: String, n: u64, bad: Vec<String>) -> Result<(), String> { migrate::applied(&app, stamp, before, n, bad) }
 #[tauri::command] fn migrate_restored(app: tauri::AppHandle) -> Result<(), String> { migrate::restored(&app) }
 /// «Перенести заново»: новая копия и чтение Electron, окно «Пульса» открывается заново и получает данные
@@ -356,7 +356,7 @@ async fn migrate_restore(app: tauri::AppHandle) -> Result<serde_json::Value, Str
 }
 // аккаунт «Пульса» (друзья, чаты, «Искра») — как social:get / social:set в Electron-версии (main.js)
 const SOCIAL_URL: &str = "https://pulse-online.pulsmusic.workers.dev";
-#[tauri::command]
+#[tauri::command(async)]
 fn social_get(app: tauri::AppHandle) -> serde_json::Value {
     let mut v = migrate::social_read(&app);
     if !v.is_object() { v = serde_json::json!({}); }
@@ -477,7 +477,7 @@ fn lib_scan(app: &tauri::AppHandle) {
     lib_emit(app, "changed", serde_json::json!(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)));
 }
 fn lib_bg_scan(app: &tauri::AppHandle) { let h = app.clone(); std::thread::spawn(move || lib_scan(&h)); }
-#[tauri::command]
+#[tauri::command(async)]
 fn local_list() -> serde_json::Value {
     match LIB.lock() { Ok(g) => match g.as_ref() { Some(s) => s.lib.list(s.scanning.clone()), None => serde_json::json!({ "roots": [], "tracks": [], "scanning": null, "hidden": 0 }) }, Err(_) => serde_json::json!({ "roots": [], "tracks": [] }) }
 }
@@ -499,9 +499,9 @@ async fn local_pick_files(app: tauri::AppHandle) -> usize {
     let paths: Vec<String> = list.into_iter().take(500).filter_map(|f| f.into_path().ok()).map(|p| p.to_string_lossy().to_string()).collect();
     lib_add(&app, paths)
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn local_add(app: tauri::AppHandle, paths: Vec<String>) -> usize { lib_add(&app, paths.into_iter().take(200).collect()) }
-#[tauri::command]
+#[tauri::command(async)]
 fn local_remove(app: tauri::AppHandle, root: String) -> bool {
     let ch = { let Ok(mut g) = LIB.lock() else { return false }; let Some(s) = g.as_mut() else { return false }; let c = s.lib.remove_root(&root); if c { let _ = s.lib.save(&s.path); } c };
     if ch { lib_bg_scan(&app); }
@@ -509,19 +509,19 @@ fn local_remove(app: tauri::AppHandle, root: String) -> bool {
 }
 #[tauri::command]
 fn local_rescan(app: tauri::AppHandle) -> bool { lib_bg_scan(&app); true }
-#[tauri::command]
+#[tauri::command(async)]
 fn local_hide(app: tauri::AppHandle, ids: Vec<String>) -> usize {
     let n = { let Ok(mut g) = LIB.lock() else { return 0 }; let Some(s) = g.as_mut() else { return 0 }; let n = s.lib.hide(&ids); if n > 0 { let _ = s.lib.save(&s.path); } n };
     if n > 0 { lib_emit(&app, "changed", serde_json::json!(1)); }
     n
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn local_unhide(app: tauri::AppHandle) -> usize {
     let n = { let Ok(mut g) = LIB.lock() else { return 0 }; let Some(s) = g.as_mut() else { return 0 }; let n = s.lib.v["hidden"].as_array().map(|a| a.len()).unwrap_or(0); s.lib.v["hidden"] = serde_json::json!([]); let _ = s.lib.save(&s.path); n };
     if n > 0 { lib_bg_scan(&app); }
     n
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn local_reveal(id: String) -> bool {
     let p = LIB.lock().ok().and_then(|g| g.as_ref().and_then(|s| s.lib.path_of(&id)));
     let Some(p) = p else { return false };
@@ -536,13 +536,13 @@ fn dsd_open(id: &str) -> Result<dsd::Reader, String> {
     let o = localfile::Opened::open(&src).map_err(|e| e.to_string())?;
     dsd::Reader::open(Box::new(localfile::Reader::new(o)))
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn dsd_info(id: String) -> Result<serde_json::Value, String> {
     let r = dsd_open(&id)?; let i = &r.info;
     Ok(serde_json::json!({ "kind": i.kind, "grade": i.grade(), "fs": i.fs, "channels": i.channels, "duration": i.duration(), "outRate": i.out_rate }))
 }
 /// APE и WavPack: формат и длительность (лаборатория)
-#[tauri::command]
+#[tauri::command(async)]
 fn pack_info(id: String) -> Result<serde_json::Value, String> {
     let src = localfile::get(&id).ok_or("файл больше не в списке")?;
     let o = localfile::Opened::open(&src).map_err(|e| e.to_string())?;
@@ -582,10 +582,12 @@ fn eng() -> Result<&'static engine::Engine, String> { engine::get().ok_or_else(|
 #[tauri::command] fn engine_rate(v: u32, r: f32) -> Result<(), String> { eng()?.rate(v, r); Ok(()) }
 #[tauri::command] fn engine_state(v: u32) -> Result<Option<engine::VoiceState>, String> { Ok(eng()?.state(v)) }
 #[tauri::command] fn engine_eq(on: bool, g: Vec<f32>, pre: f32, lim: bool) -> Result<(), String> { eng()?.set_eq(on, g, pre, lim); Ok(()) }
-#[tauri::command] fn engine_tap(n: usize) -> Result<Vec<f32>, String> { Ok(eng()?.tap(n)) }
+// 0.44 сигнал для визуализаторов (~30 раз в секунду) — сырыми байтами (f32, little-endian), а не JSON-массивом из 2048
+// чисел; и не в главном потоке (там же окно). В интерфейсе — new Float32Array(ответ), см. engineAudio.js tap()
+#[tauri::command(async)] fn engine_tap(n: usize) -> Result<tauri::ipc::Response, String> { let v = eng()?.tap(n); let mut b = Vec::with_capacity(v.len() * 4); for x in v { b.extend_from_slice(&x.to_le_bytes()); } Ok(tauri::ipc::Response::new(b)) }
 #[tauri::command] fn engine_stats() -> Result<serde_json::Value, String> { Ok(eng()?.stats()) }
 #[tauri::command] fn engine_info() -> Result<serde_json::Value, String> { let e = eng()?; Ok(serde_json::json!({ "rate": e.out_rate(), "device": e.device_now() })) }
-#[tauri::command] fn engine_devices() -> Vec<String> { engine::devices() }
+#[tauri::command(async)] fn engine_devices() -> Vec<String> { engine::devices() }   // перебор устройств вывода бывает долгим — не в главном потоке
 #[tauri::command] fn engine_set_device(name: String) -> Result<(), String> { eng()?.set_device(name); Ok(()) }
 
 // ——— обновления по воздуху (updater.rs), тот же формат ответов, что у upd:* в Electron-версии
@@ -625,12 +627,13 @@ async fn cd_piece(file: String, s: f64, e: f64) -> Result<tauri::ipc::Response, 
     tauri::async_runtime::spawn_blocking(move || cd::piece(&file, s, e)).await.map_err(|e| e.to_string())?.map(tauri::ipc::Response::new)
 }
 #[tauri::command] async fn cd_drives() -> serde_json::Value { tauri::async_runtime::spawn_blocking(cd::drives).await.unwrap_or_else(|e| serde_json::json!({ "ok": false, "err": e.to_string() })) }
-#[tauri::command] fn cd_begin(n: u32) -> serde_json::Value { cd::begin(n) }
+#[tauri::command(async)] fn cd_begin(n: u32) -> serde_json::Value { cd::begin(n) }
 fn raw_body<'a>(r: &'a tauri::ipc::Request<'_>) -> &'a [u8] { match r.body() { tauri::ipc::InvokeBody::Raw(b) => b, _ => &[] } }
 fn hdr(r: &tauri::ipc::Request<'_>, k: &str) -> String { r.headers().get(k).and_then(|v| v.to_str().ok()).unwrap_or("").to_string() }
+// куски звука для записи — запись на диск не в главном потоке (асинхронная команда с Request обязана возвращать Result)
 #[tauri::command]
-fn cd_put(request: tauri::ipc::Request<'_>) -> serde_json::Value {
-    cd::put(&hdr(&request, "x-id"), hdr(&request, "x-i").parse().unwrap_or(0), raw_body(&request), hdr(&request, "x-mode").parse().unwrap_or(0))
+async fn cd_put(request: tauri::ipc::Request<'_>) -> Result<serde_json::Value, String> {
+    Ok(cd::put(&hdr(&request, "x-id"), hdr(&request, "x-i").parse().unwrap_or(0), raw_body(&request), hdr(&request, "x-mode").parse().unwrap_or(0)))
 }
 #[tauri::command]
 async fn cd_burn(app: tauri::AppHandle, id: String, o: serde_json::Value) -> serde_json::Value {
@@ -669,9 +672,9 @@ async fn cdw_pick_out(app: tauri::AppHandle, cur: Option<String>) -> Option<Stri
     cd::clean_parts(&p);
     Some(p.to_string_lossy().to_string())
 }
-#[tauri::command] fn cdw_open(dir: String, name: String, mode: Option<String>) -> serde_json::Value { cd::wav_open(&dir, &name, mode.as_deref().unwrap_or("number")) }
-#[tauri::command] fn cdw_write(request: tauri::ipc::Request<'_>) -> serde_json::Value { cd::wav_write(&hdr(&request, "x-id"), raw_body(&request)) }
-#[tauri::command] fn cdw_finish(id: String, n: u64) -> serde_json::Value { cd::wav_finish(&id, n) }
+#[tauri::command(async)] fn cdw_open(dir: String, name: String, mode: Option<String>) -> serde_json::Value { cd::wav_open(&dir, &name, mode.as_deref().unwrap_or("number")) }
+#[tauri::command] async fn cdw_write(request: tauri::ipc::Request<'_>) -> Result<serde_json::Value, String> { Ok(cd::wav_write(&hdr(&request, "x-id"), raw_body(&request))) }
+#[tauri::command(async)] fn cdw_finish(id: String, n: u64) -> serde_json::Value { cd::wav_finish(&id, n) }
 #[tauri::command] fn cdw_abort(id: String) -> bool { cd::wav_abort(&id) }
 #[tauri::command]
 fn cdw_reveal(p: String) -> bool {
