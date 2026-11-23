@@ -1,0 +1,16 @@
+{
+  "version": "0.45.1",
+  "engine": "tauri",
+  "arm64": {
+    "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.45.1/Pulse-Mac-Apple-M.zip",
+    "sha256": "d192db7958ca1fd369b68a5140335801fdcf351cb2c3651eeb5036c0dbb50098",
+    "size": 4465834,
+    "sig": "U9AJ6nxMPRXpiSu/BjUOqsb6DBTXuCbijZZtzABJsWxRbTrZ2dP6HzJtFfrVUHnFMCpyFZvlh49Spz///qo6Cg=="
+  },
+  "x64": {
+    "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.45.1/Pulse-Mac-Intel.zip",
+    "sha256": "08cdce95037513741ca164bac679743582ec9da4fb18c6d222060e77faedb9db",
+    "size": 4874755,
+    "sig": "BagwLZuunX7itFjrV0NuaozPW6RLjFJnebtRsKHImRFEr3l9RUxkcLQ/EveSEEwyoGxNVbeh3nzAD67alEv/CQ=="
+  }
+}
