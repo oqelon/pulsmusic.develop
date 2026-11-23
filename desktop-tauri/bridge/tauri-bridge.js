@@ -346,6 +346,12 @@
     };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
   })();
+  // 0.44.1 системное меню правой кнопки (в нём «Перезагрузить», «Проверить элемент») — только в полях ввода: там нужны
+  // «Вырезать / Копировать / Вставить». Свои меню «Пульса» (треки, альбомы) работают как раньше
+  if (document.addEventListener) document.addEventListener('contextmenu', function (e) {
+    var t = e.target, ed = t && t.closest && t.closest('input, textarea, [contenteditable=""], [contenteditable="true"]');
+    if (!ed) e.preventDefault();
+  });
   P.onAiStatus = function () { return function () {}; };
   P.aiStatus = function () { return Promise.resolve(null); };
 

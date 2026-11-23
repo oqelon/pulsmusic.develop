@@ -184,6 +184,11 @@ pub struct Shared {
     tap: Mutex<(Vec<f32>, usize)>,
     device: Mutex<String>,
     device_now: Mutex<String>,
+    /// 0.44.1 выбранное устройство не открылось (занято другой программой, отключено) — почему; звук тем временем
+    /// идёт на системное устройство, а выбранное пробуем снова каждые ~3 с
+    dev_err: Mutex<String>,
+    /// поток вывода сообщил об ошибке (устройство пропало, его заняли) — пересобрать
+    out_broken: AtomicBool,
     next_id: AtomicU32,
     out_tx: Mutex<Option<Sender<String>>>,
     /// убранные голоса держим ещё 2 с, чтобы память кольца освобождалась не в потоке вывода
@@ -201,6 +206,8 @@ impl Shared {
             tap: Mutex::new((vec![0.0; TAP], 0)),
             device: Mutex::new(String::new()),
             device_now: Mutex::new(String::new()),
+            dev_err: Mutex::new(String::new()),
+            out_broken: AtomicBool::new(false),
             next_id: AtomicU32::new(1),
             out_tx: Mutex::new(None),
             grave: Mutex::new(Vec::new()),
@@ -334,6 +341,8 @@ impl Engine {
         if let Ok(t) = self.sh.out_tx.lock() { if let Some(t) = t.as_ref() { let _ = t.send(name); } }
     }
     pub fn device_now(&self) -> String { self.sh.device_now.lock().map(|d| d.clone()).unwrap_or_default() }
+    pub fn device_want(&self) -> String { self.sh.device.lock().map(|d| d.clone()).unwrap_or_default() }
+    pub fn device_err(&self) -> String { self.sh.dev_err.lock().map(|d| d.clone()).unwrap_or_default() }
     /// Сбои звука с запуска — для отчёта «Лаборатории».
     pub fn stats(&self) -> serde_json::Value {
         let g = |a: &AtomicU64| a.load(Relaxed);
@@ -898,12 +907,26 @@ impl Master {
     }
 }
 
-fn build_stream(sh: Arc<Shared>, name: &str) -> Result<(cpal::Stream, String), String> {
+/// понятная причина, почему устройство не открылось (на Mac — какая программа держит его в монопольном режиме)
+fn why_busy(name: &str, e: &str) -> String {
+    #[cfg(target_os = "macos")]
+    { if let Some(p) = ca::hog_owner(name) { return format!("занято программой {p} в монопольном режиме — закройте её или выключите в ней монопольный вывод"); } }
+    let _ = name;
+    let l = e.to_lowercase();
+    if l.contains("in use") || l.contains("exclusive") || l.contains("0x8889000a") { return "занято другой программой в монопольном режиме — закройте её или выключите в ней монопольный вывод".into(); }
+    if l.contains("not available") || l.contains("no longer") { return "устройство недоступно — отключено или занято".into(); }
+    format!("не открылось ({e})")
+}
+
+/// name пустое — системное устройство; strict — нужно именно это устройство (не нашли — ошибка, а не системное)
+fn build_stream(sh: Arc<Shared>, name: &str, strict: bool) -> Result<(cpal::Stream, String), String> {
     let host = cpal::default_host();
-    let dev = if name.is_empty() { host.default_output_device() } else { host.output_devices().ok().and_then(|mut it| it.find(|d| d.name().map(|n| n == name).unwrap_or(false))).or_else(|| host.default_output_device()) };
+    let found = if name.is_empty() { None } else { host.output_devices().ok().and_then(|mut it| it.find(|d| d.name().map(|n| n == name).unwrap_or(false))) };
+    if strict && found.is_none() { return Err("не найдено — отключено от компьютера?".into()); }
+    let dev = found.or_else(|| host.default_output_device());
     let dev = dev.ok_or("нет устройства вывода")?;
     let dname = dev.name().unwrap_or_default();
-    let cfg = dev.default_output_config().map_err(|e| e.to_string())?;
+    let cfg = dev.default_output_config().map_err(|e| why_busy(&dname, &e.to_string()))?;
     let rate = cfg.sample_rate().0;
     let ch = cfg.channels() as usize;
     let old = sh.out_rate.swap(rate, AcqRel);
@@ -915,12 +938,13 @@ fn build_stream(sh: Arc<Shared>, name: &str) -> Result<(cpal::Stream, String), S
     }
     let scfg: cpal::StreamConfig = cfg.clone().into();
     let sh_err = sh.clone();
-    let err = move |e: cpal::StreamError| { ST.stream_err.fetch_add(1, Relaxed); sh_err.note(format!("ошибка вывода: {e}")); };
+    let err = move |e: cpal::StreamError| { ST.stream_err.fetch_add(1, Relaxed); sh_err.note(format!("ошибка вывода: {e}")); sh_err.out_broken.store(true, Relaxed); };
     macro_rules! mk {
         ($t:ty, $conv:expr) => {{
             let sh2 = sh.clone();
             let mut m = Master::new();
             let mut last: Option<Instant> = None;
+            let err = err.clone();
             dev.build_output_stream(&scfg, move |data: &mut [$t], _| {
                 let t0 = Instant::now();
                 let frames = data.len() / ch.max(1);
@@ -937,14 +961,24 @@ fn build_stream(sh: Arc<Shared>, name: &str) -> Result<(cpal::Stream, String), S
             }, err, None)
         }};
     }
-    let stream = match cfg.sample_format() {
+    let first = match cfg.sample_format() {
         cpal::SampleFormat::F32 => mk!(f32, |x: f32| x),
         cpal::SampleFormat::I16 => mk!(i16, |x: f32| (x * 32767.0) as i16),
         cpal::SampleFormat::U16 => mk!(u16, |x: f32| ((x * 0.5 + 0.5) * 65535.0) as u16),
         cpal::SampleFormat::I32 => mk!(i32, |x: f32| (x as f64 * 2147483647.0) as i32),
-        f => return Err(format!("формат вывода {f:?} не поддержан")),
-    }.map_err(|e| e.to_string())?;
-    stream.play().map_err(|e| e.to_string())?;
+        f => Err(cpal::BuildStreamError::BackendSpecific { err: cpal::BackendSpecificError { description: format!("формат вывода {f:?} не поддержан") } }),
+    };
+    // 0.44.1 родной формат устройства не открылся (бывает у ЦАП в целочисленном формате на высоких частотах) —
+    // пробуем 32 бит float: система сама переведёт его в формат устройства без потерь
+    let stream = match first {
+        Ok(s) => s,
+        Err(e) if cfg.sample_format() != cpal::SampleFormat::F32 => {
+            sh.note(format!("«{dname}»: формат {:?} не открылся ({e}) — пробую 32 бит float", cfg.sample_format()));
+            mk!(f32, |x: f32| x).map_err(|e2| why_busy(&dname, &e2.to_string()))?
+        }
+        Err(e) => return Err(why_busy(&dname, &e.to_string())),
+    };
+    stream.play().map_err(|e| why_busy(&dname, &e.to_string()))?;
     ST.rebuilds.fetch_add(1, Relaxed);
     sh.note(format!("вывод: «{dname}», {rate} Гц, {ch} кан., {:?}", cfg.sample_format()));
     Ok((stream, dname))
@@ -954,11 +988,24 @@ fn output_thread(sh: Arc<Shared>, rx: Receiver<String>) {
     let mut want = String::new();
     let mut stream: Option<cpal::Stream> = None;
     let mut last_default = String::new();
+    let mut on_want = true;   // играет то устройство, что выбрано (а не системное вместо него)
+    let mut retry = Instant::now();
+    let set_err = |m: String| { if let Ok(mut d) = sh.dev_err.lock() { *d = m; } };
     loop {
+        if sh.out_broken.swap(false, Relaxed) { stream = None; }
         if stream.is_none() {
-            match build_stream(sh.clone(), &want) {
-                Ok((s, n)) => { stream = Some(s); if let Ok(mut d) = sh.device_now.lock() { *d = n.clone(); } last_default = n; }
-                Err(e) => { sh.note(format!("устройство: {e}")); }
+            match build_stream(sh.clone(), &want, !want.is_empty()) {
+                Ok((s, n)) => { stream = Some(s); if let Ok(mut d) = sh.device_now.lock() { *d = n.clone(); } last_default = n; on_want = true; set_err(String::new()); }
+                Err(e) => {
+                    sh.note(format!("устройство «{}»: {e}", if want.is_empty() { "системное" } else { &want }));
+                    if want.is_empty() { set_err(e); }
+                    else {
+                        // 0.44.1 выбранное не открылось — играем на системном, чтобы звук не пропадал, и пробуем снова
+                        set_err(format!("«{want}»: {e}"));
+                        on_want = false; retry = Instant::now();
+                        if let Ok((s, n)) = build_stream(sh.clone(), "", false) { stream = Some(s); if let Ok(mut d) = sh.device_now.lock() { *d = n.clone(); } last_default = n; }
+                    }
+                }
             }
         }
         match rx.recv_timeout(Duration::from_millis(1500)) {
@@ -966,12 +1013,137 @@ fn output_thread(sh: Arc<Shared>, rx: Receiver<String>) {
             Err(RecvTimeoutError::Disconnected) => return,
             Err(RecvTimeoutError::Timeout) => {
                 // «по умолчанию»: если в системе выбрали другое устройство (AirPods и т. п.) — переходим на него
-                if want.is_empty() {
+                if want.is_empty() || !on_want {
                     let d = cpal::default_host().default_output_device().and_then(|d| d.name().ok()).unwrap_or_default();
-                    if !d.is_empty() && d != last_default { stream = None; }
+                    if !d.is_empty() && d != last_default && want.is_empty() { stream = None; }
+                }
+                // выбранное устройство освободилось — переходим на него
+                if !want.is_empty() && !on_want && retry.elapsed() >= Duration::from_secs(3) {
+                    retry = Instant::now();
+                    if let Ok((s, n)) = build_stream(sh.clone(), &want, true) {
+                        stream = Some(s); if let Ok(mut d) = sh.device_now.lock() { *d = n.clone(); } last_default = n; on_want = true; set_err(String::new());
+                        sh.note(format!("«{want}» освободилось — звук снова на нём"));
+                    }
                 }
                 if stream.is_none() { continue; }
             }
+        }
+    }
+}
+
+/// 0.44.1 устройства вывода с подробностями для вкладки «Звук»: имя, частота и разрядность, каналы, кто держит
+/// устройство в монопольном режиме (Mac). На Mac — сведения Core Audio (как в «Настройке Audio-MIDI»).
+pub fn devices_info() -> Vec<serde_json::Value> {
+    let host = cpal::default_host();
+    let def = host.default_output_device().and_then(|d| d.name().ok()).unwrap_or_default();
+    #[cfg(target_os = "macos")]
+    let ca_list = ca::output_devices();
+    let mut out = Vec::new();
+    if let Ok(it) = host.output_devices() {
+        for d in it {
+            let Ok(name) = d.name() else { continue };
+            let c = d.default_output_config().ok();
+            #[allow(unused_mut)]
+            let mut v = serde_json::json!({
+                "name": name, "default": name == def,
+                "rate": c.as_ref().map(|c| c.sample_rate().0).unwrap_or(0),
+                "ch": c.as_ref().map(|c| c.channels()).unwrap_or(0),
+                "bits": c.as_ref().map(|c| c.sample_format().sample_size() * 8).unwrap_or(0),
+                "float": c.as_ref().map(|c| c.sample_format().is_float()).unwrap_or(false),
+                "busy": "",
+            });
+            #[cfg(target_os = "macos")]
+            {
+                if let Some(x) = ca_list.iter().find(|x| x.name == name) {
+                    if x.rate > 0.0 { v["rate"] = serde_json::json!(x.rate.round() as u32); }
+                    if x.bits > 0 { v["bits"] = serde_json::json!(x.bits); v["float"] = serde_json::json!(x.float); }
+                    if x.ch > 0 { v["ch"] = serde_json::json!(x.ch); }
+                    if let Some(p) = x.hog_name() { v["busy"] = serde_json::json!(p); }
+                }
+            }
+            out.push(v);
+        }
+    }
+    out
+}
+
+/// 0.44.1 Core Audio напрямую (только чтение свойств): список устройств вывода, их формат и монопольный режим.
+/// Свои объявления — без лишних библиотек; фреймворк Core Audio и так подключён (cpal).
+#[cfg(target_os = "macos")]
+pub mod ca {
+    use std::ffi::c_void;
+    #[repr(C)] struct Addr { sel: u32, scope: u32, elem: u32 }
+    #[repr(C)] #[derive(Default)] struct Asbd { rate: f64, fmt: u32, flags: u32, bpp: u32, fpp: u32, bpf: u32, ch: u32, bits: u32, res: u32 }
+    #[link(name = "CoreAudio", kind = "framework")]
+    extern "C" {
+        fn AudioObjectGetPropertyDataSize(id: u32, a: *const Addr, qs: u32, q: *const c_void, size: *mut u32) -> i32;
+        fn AudioObjectGetPropertyData(id: u32, a: *const Addr, qs: u32, q: *const c_void, size: *mut u32, data: *mut c_void) -> i32;
+    }
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        fn CFStringGetCString(s: *const c_void, buf: *mut std::os::raw::c_char, size: isize, enc: u32) -> u8;
+        fn CFRelease(p: *const c_void);
+    }
+    const fn cc(s: &[u8; 4]) -> u32 { ((s[0] as u32) << 24) | ((s[1] as u32) << 16) | ((s[2] as u32) << 8) | s[3] as u32 }
+    const GLOB: u32 = cc(b"glob");
+    const OUTP: u32 = cc(b"outp");
+    fn addr(sel: &[u8; 4], scope: u32) -> Addr { Addr { sel: cc(sel), scope, elem: 0 } }
+    fn ids(obj: u32, sel: &[u8; 4], scope: u32) -> Vec<u32> {
+        let a = addr(sel, scope); let mut sz = 0u32;
+        unsafe {
+            if AudioObjectGetPropertyDataSize(obj, &a, 0, std::ptr::null(), &mut sz) != 0 || sz == 0 { return vec![]; }
+            let mut v = vec![0u32; sz as usize / 4];
+            if AudioObjectGetPropertyData(obj, &a, 0, std::ptr::null(), &mut sz, v.as_mut_ptr() as *mut c_void) != 0 { return vec![]; }
+            v.truncate(sz as usize / 4); v
+        }
+    }
+    fn get<T: Default>(obj: u32, sel: &[u8; 4], scope: u32) -> Option<T> {
+        let a = addr(sel, scope); let mut v = T::default(); let mut sz = std::mem::size_of::<T>() as u32;
+        let r = unsafe { AudioObjectGetPropertyData(obj, &a, 0, std::ptr::null(), &mut sz, &mut v as *mut T as *mut c_void) };
+        if r == 0 && sz as usize == std::mem::size_of::<T>() { Some(v) } else { None }
+    }
+    fn name(obj: u32) -> String {
+        let a = addr(b"lnam", GLOB); let mut s: *const c_void = std::ptr::null(); let mut sz = std::mem::size_of::<*const c_void>() as u32;
+        unsafe {
+            if AudioObjectGetPropertyData(obj, &a, 0, std::ptr::null(), &mut sz, &mut s as *mut *const c_void as *mut c_void) != 0 || s.is_null() { return String::new(); }
+            let mut buf = vec![0 as std::os::raw::c_char; 512];
+            let ok = CFStringGetCString(s, buf.as_mut_ptr(), buf.len() as isize, 0x0800_0100);
+            CFRelease(s);
+            if ok == 0 { return String::new(); }
+            std::ffi::CStr::from_ptr(buf.as_ptr()).to_string_lossy().into_owned()
+        }
+    }
+    pub struct Dev { pub name: String, pub rate: f64, pub bits: u32, pub float: bool, pub ch: u32, pub hog: i32 }
+    impl Dev {
+        /// чужая программа держит устройство монопольно → её имя
+        pub fn hog_name(&self) -> Option<String> {
+            if self.hog <= 0 || self.hog as u32 == std::process::id() { return None; }
+            let o = std::process::Command::new("/bin/ps").args(["-p", &self.hog.to_string(), "-o", "comm="]).output().ok()?;
+            let p = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            let n = p.rsplit('/').next().unwrap_or("").trim_end_matches(".app").to_string();
+            Some(if n.is_empty() { format!("с номером процесса {}", self.hog) } else { n })
+        }
+    }
+    pub fn output_devices() -> Vec<Dev> {
+        let mut out = Vec::new();
+        for id in ids(1, b"dev#", GLOB) {
+            let streams = ids(id, b"stm#", OUTP);
+            if streams.is_empty() { continue; }
+            let f: Asbd = get(streams[0], b"pft ", GLOB).unwrap_or_default();
+            out.push(Dev {
+                name: name(id), rate: get::<f64>(id, b"nsrt", GLOB).unwrap_or(f.rate), bits: f.bits, float: f.flags & 1 != 0, ch: f.ch,
+                hog: get::<i32>(id, b"oink", GLOB).unwrap_or(-1),
+            });
+        }
+        out
+    }
+    pub fn hog_owner(name: &str) -> Option<String> { output_devices().into_iter().find(|d| d.name == name).and_then(|d| d.hog_name()) }
+
+    #[cfg(test)]
+    mod tests {
+        #[test]
+        fn lists_output_devices_without_crash() {
+            for d in super::output_devices() { assert!(d.rate >= 0.0); let _ = d.hog_name(); eprintln!("{} {} Гц {} бит, кан. {}, hog {}", d.name, d.rate, d.bits, d.ch, d.hog); }
         }
     }
 }
@@ -1182,6 +1354,35 @@ mod tests {
             let at = (0.75 * rate as f64).round() as usize;
             assert_eq!(&l[..64], &want[at..at + 64], "{name}: перемотка не туда");
         }
+    }
+
+    #[test]
+    fn every_claimed_format_gives_cd_audio() {
+        // 0.44.1 «все ли форматы правда работают»: каждый файл-образец — тем же путём, что «Записать CD» и «В файлы WAV»
+        // (cd::piece). Движок разжимает сам → кусок WAV 44,1 кГц нужной длины и не тишина; Opus/WebM → файл целиком
+        // (его разжимает окно), как задумано
+        let lab = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../lab-media");
+        let own = ["mp3-320.mp3", "fmt-vbr.mp3", "aac-256.m4a", "fmt-aac.m4b", "fmt-aac.mp4", "fmt-adts.aac", "flac-16-44.flac", "flac-24-96.flac", "flac-24-192.flac",
+            "flac-in-mp4.m4a", "alac-16-44.m4a", "fmt-alac.caf", "wav-16-44.wav", "wav-24-96.wav", "fmt-f32-48.wav", "aiff-16-44.aif", "fmt-s24.aiff", "fmt-s16-48.aifc",
+            "ogg-vorbis.ogg", "fmt-vorbis.oga", "wavpack.wv", "wv-f32.wv", "ape-s16-5000-3990.ape", "ape-s24-3000-3980.ape"];
+        let win = ["opus.opus", "fmt-opus-in.ogg", "webm-opus.webm", "webm-vorbis.webm"];
+        let mut bad = Vec::new();
+        for (i, name) in own.iter().chain(win.iter()).enumerate() {
+            let id = format!("fmt-{i}");
+            crate::localfile::register(&id, crate::localfile::Src::File(lab.join(name)));
+            match crate::cd::piece(&id, 0.0, 0.9) {
+                Err(e) => bad.push(format!("{name}: {e}")),
+                Ok(b) if win.contains(name) => { if b[0] != 0 { bad.push(format!("{name}: ждали файл целиком для окна")); } }
+                Ok(b) => {
+                    if b[0] != 1 { bad.push(format!("{name}: движок не разжал (файл целиком)")); continue; }
+                    let n = (b.len() - 1 - 44) / 6;
+                    let peak = b[45..].chunks(3).map(|c| (i32::from_le_bytes([0, c[0], c[1], c[2]]) >> 8).unsigned_abs()).max().unwrap_or(0);
+                    if (n as i64 - 39690).abs() > 2 { bad.push(format!("{name}: {n} отсчётов вместо 39690")); }
+                    if peak < 100_000 { bad.push(format!("{name}: тишина (пик {peak})")); }
+                }
+            }
+        }
+        assert!(bad.is_empty(), "форматы: {bad:#?}");
     }
 
     #[test]

@@ -367,12 +367,24 @@ core() {
   fi
 }
 if [ "$MODE" = core ]; then core; exit 0; fi
-i=0; while kill -0 "$PID" 2>/dev/null && [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done
+LOG="$HOME/Library/Logs/Pulse"; mkdir -p "$LOG" 2>/dev/null; LOG="$LOG/update.log"
+log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$LOG" 2>/dev/null; }
+log "замена ($MODE): жду выхода $PID"
+i=0; while kill -0 "$PID" 2>/dev/null && [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done
+# 0.44.1 не вышла за 10 с (повис звук, диалог) — закрываем сами: иначе «open» лишь показывал зависшую старую копию
+if kill -0 "$PID" 2>/dev/null; then log "не вышла за 10 с — закрываю"; kill -9 "$PID" 2>/dev/null; sleep 0.5; fi
 if [ "$MODE" = admin ]; then
-  /usr/bin/osascript -e "do shell script \"/bin/sh '$0' core 0 '$OLD' '$NEW' '$WORK'\" with administrator privileges" || true
+  /usr/bin/osascript -e "do shell script \"/bin/sh '$0' core 0 '$OLD' '$NEW' '$WORK'\" with administrator privileges" || log "пароль не введён"
 else core; fi
+[ -d "$NEW" ] && log "замена не удалась — открываю прежнюю версию" || log "заменено"
 rm -rf "$WORK"
-[ "$MODE" = quiet ] || /usr/bin/open "$OLD"
+if [ "$MODE" != quiet ]; then
+  sleep 1
+  k=0; while [ $k -lt 3 ]; do
+    /usr/bin/open "$OLD" && { log "открыта"; break; }
+    k=$((k+1)); log "open не удался, ещё раз"; sleep 1
+  done
+fi
 "#;
 
 fn start_swap(s: &Staged, mode: &str) -> Result<(), String> {
@@ -395,11 +407,17 @@ fn start_swap(s: &Staged, mode: &str) -> Result<(), String> {
         // ждём выхода «Пульса», тихо ставим новую версию поверх и (кроме quiet) открываем её; окна не видно
         use std::os::windows::process::CommandExt;
         let q = |p: &Path| p.to_string_lossy().replace('\'', "''");
-        let ps = format!("$p={pid}; for($i=0;$i -lt 300 -and (Get-Process -Id $p -ErrorAction SilentlyContinue);$i++){{Start-Sleep -Milliseconds 100}}; \
-            $r=Start-Process -FilePath '{setup}' -ArgumentList '/S' -Wait -PassThru; \
-            if('{mode}' -ne 'quiet'){{ Start-Process -FilePath '{exe}' }}; \
+        // 0.44.1 не вышла за 10 с — закрываем сами (иначе установщик видел запущенный «Пульс» и не ставил); журнал —
+        // %TEMP%\pulse-update.log; после установки открываем новую версию (до 3 попыток)
+        let ps = format!("$L=Join-Path $env:TEMP 'pulse-update.log'; function L($m){{ Add-Content -LiteralPath $L -Value ((Get-Date -Format 'yyyy-MM-dd HH:mm:ss')+' '+$m) -ErrorAction SilentlyContinue }}; \
+            $p={pid}; L ('замена ({mode}): жду выхода '+$p); for($i=0;$i -lt 100 -and (Get-Process -Id $p -ErrorAction SilentlyContinue);$i++){{Start-Sleep -Milliseconds 100}}; \
+            if(Get-Process -Id $p -ErrorAction SilentlyContinue){{ L 'не вышла за 10 с — закрываю'; Stop-Process -Id $p -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 700 }}; \
+            $r=Start-Process -FilePath '{setup}' -ArgumentList '/S','/D={dir}' -Wait -PassThru; L ('установщик: код '+$r.ExitCode); \
+            if('{mode}' -ne 'quiet'){{ for($k=0;$k -lt 3;$k++){{ try {{ Start-Process -FilePath '{exe}' -ErrorAction Stop; L 'открыта'; break }} catch {{ L ('не открылась: '+$_); Start-Sleep -Seconds 1 }} }} }}; \
             Start-Sleep -Seconds 2; Remove-Item -LiteralPath '{work}' -Recurse -Force -ErrorAction SilentlyContinue",
-            pid = std::process::id(), setup = q(&s.from), exe = q(&s.to), work = q(&s.work), mode = mode);
+            pid = std::process::id(), setup = q(&s.from), exe = q(&s.to), work = q(&s.work), mode = mode,
+            // ставим туда же, где стоит эта копия (иначе установщик мог выбрать другую папку, и открывалась старая версия)
+            dir = s.to.parent().map(|d| q(d)).unwrap_or_default());
         std::process::Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-Command", &ps])
             .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
             .creation_flags(0x0800_0000)
@@ -414,7 +432,13 @@ fn start_swap(s: &Staged, mode: &str) -> Result<(), String> {
 pub fn restart(app: &tauri::AppHandle) {
     let mut g = st();
     if let Some(s) = g.staged.as_mut() {
-        if start_swap(s, if s.admin { "admin" } else { "user" }).is_ok() { s.swapped = true; drop(g); app.exit(0); return; }
+        if start_swap(s, if s.admin { "admin" } else { "user" }).is_ok() {
+            s.swapped = true; drop(g);
+            // 0.44.1 страховка: если обычный выход застрял (звук, открытое окно), через 4 с завершаемся сами — скрипт
+            // замены ждёт именно выхода программы, без него новая версия не ставилась и не открывалась
+            std::thread::spawn(|| { std::thread::sleep(std::time::Duration::from_secs(4)); std::process::exit(0); });
+            app.exit(0); return;
+        }
     }
     drop(g);
     app.restart();

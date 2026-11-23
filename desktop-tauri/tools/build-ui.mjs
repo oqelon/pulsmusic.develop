@@ -19,7 +19,8 @@ mkdirSync(path.join(out, 'dist'), { recursive: true });
 await build({
   entryPoints: [path.join(src, 'src/main.jsx')], bundle: true, minify: true, outfile: path.join(out, 'dist/app.js'), format: 'iife', target: ['chrome120', 'safari15'],   // safari15: Mac (WebKit) — esbuild добавит -webkit- (user-select, backdrop-filter…)
   jsx: 'automatic', loader: { '.js': 'jsx', '.png': 'dataurl', '.woff': 'dataurl' },
-  define: { 'process.env.NODE_ENV': '"production"' }, logLevel: 'warning', absWorkingDir: src,
+  // номер выпуска — из desktop-tauri/RELEASE (его же ставит сборка выпуска): шапка, профиль, экран входа
+  define: { 'process.env.NODE_ENV': '"production"', __PULSE_VER__: JSON.stringify(readFileSync(path.join(here, '..', 'RELEASE'), 'utf8').trim()) }, logLevel: 'warning', absWorkingDir: src,
   nodePaths: process.env.ESBUILD_DIR ? [path.join(process.env.ESBUILD_DIR, 'node_modules')] : [],
 });
 copyFileSync(path.join(src, 'src/index.html'), path.join(out, 'dist/index.html'));

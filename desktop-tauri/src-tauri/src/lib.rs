@@ -216,6 +216,7 @@ async fn ya_login(app: tauri::AppHandle) -> Result<(), String> {
     WebviewWindowBuilder::new(&app, "login", WebviewUrl::External(url))
         .title("Вход в Яндекс Музыку")
         .inner_size(520.0, 760.0)
+        .devtools(!RELEASE)
         .on_navigation(move |u| {
             let Some(t) = token_from_url(u.as_str()) else { return true };
             if done.swap(true, Ordering::SeqCst) { return false; }
@@ -256,7 +257,10 @@ async fn open_ui(app: tauri::AppHandle) -> Result<(), String> {
         .initialization_script(format!("window.__PULSE_TOKEN__ = {tok}; window.__PULSE_TOKEN_INFO__ = {info}; {mig}"))
         // как hardenWindow в Electron-версии (security.js): окно «Пульса» никуда не уходит со своей страницы —
         // случайный переход (перетащенная картинка, ссылка) перезагрузил бы интерфейс. Ссылки наружу — в браузер.
-        .on_navigation({ let h = app.clone(); move |u| nav_guard(&h, u) });
+        .on_navigation({ let h = app.clone(); move |u| nav_guard(&h, u) })
+        // 0.44.1 инструменты разработчика в выпуске закрыты: правой кнопкой не открыть «Проверить элемент» (там видны код
+        // и токен окна). Открываются только после пароля разработчика (dev_devtools — окно открывается заново с ними)
+        .devtools(!RELEASE || DEVTOOLS.load(Ordering::SeqCst));
     #[cfg(target_os = "macos")]
     let b = b.title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true);
     // Windows: своя шапка, как в Electron (titleBarStyle hidden + кнопки поверх) — рамку убираем, кнопки рисует мост
@@ -589,7 +593,9 @@ fn eng() -> Result<&'static engine::Engine, String> { engine::get().ok_or_else(|
 // чисел; и не в главном потоке (там же окно). В интерфейсе — new Float32Array(ответ), см. engineAudio.js tap()
 #[tauri::command(async)] fn engine_tap(n: usize) -> Result<tauri::ipc::Response, String> { let v = eng()?.tap(n); let mut b = Vec::with_capacity(v.len() * 4); for x in v { b.extend_from_slice(&x.to_le_bytes()); } Ok(tauri::ipc::Response::new(b)) }
 #[tauri::command] fn engine_stats() -> Result<serde_json::Value, String> { Ok(eng()?.stats()) }
-#[tauri::command] fn engine_info() -> Result<serde_json::Value, String> { let e = eng()?; Ok(serde_json::json!({ "rate": e.out_rate(), "device": e.device_now() })) }
+#[tauri::command] fn engine_info() -> Result<serde_json::Value, String> { let e = eng()?; Ok(serde_json::json!({ "rate": e.out_rate(), "device": e.device_now(), "want": e.device_want(), "err": e.device_err() })) }
+/// 0.44.1 устройства вывода с форматом и занятостью (вкладка «Звук» → «Профессиональный вывод»)
+#[tauri::command(async)] fn engine_devices_info() -> Vec<serde_json::Value> { engine::devices_info() }
 #[tauri::command(async)] fn engine_devices() -> Vec<String> { engine::devices() }   // перебор устройств вывода бывает долгим — не в главном потоке
 #[tauri::command] fn engine_set_device(name: String) -> Result<(), String> { eng()?.set_device(name); Ok(()) }
 
@@ -652,7 +658,7 @@ fn adhoc(paths: Vec<String>) -> serde_json::Value {
     }
     serde_json::json!({ "ok": ok, "bad": bad })
 }
-const CDW_EXT: &[&str] = &["flac", "mp3", "m4a", "aac", "ogg", "oga", "opus", "wav", "ape", "wv", "aiff", "aif", "aifc", "wma", "webm", "dsf", "dff"];
+const CDW_EXT: &[&str] = &["flac", "mp3", "m4a", "aac", "ogg", "oga", "opus", "wav", "ape", "wv", "aiff", "aif", "aifc", "webm", "dsf", "dff"];   // 0.44.1 без WMA: его не разжимает ни движок, ни окно
 #[tauri::command]
 async fn cdw_pick_files(app: tauri::AppHandle) -> serde_json::Value {
     let Some(list) = app.dialog().file().set_title("Аудиофайлы").add_filter("Аудио", CDW_EXT).blocking_pick_files() else { return serde_json::Value::Null };
@@ -694,11 +700,21 @@ fn cdw_reveal(p: String) -> bool {
 #[tauri::command] fn discord_state() -> String { extras::discord_state() }
 #[tauri::command] async fn online_get() -> serde_json::Value { extras::online_count().await }
 #[tauri::command] async fn dev_unlock(pw: String) -> serde_json::Value { tauri::async_runtime::spawn_blocking(move || extras::dev_unlock(&pw)).await.unwrap_or_else(|_| serde_json::json!({ "ok": false })) }
+/// окно «Пульса» с инструментами разработчика (в выпуске — только после пароля разработчика)
+static DEVTOOLS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 #[tauri::command]
-fn dev_devtools(window: tauri::WebviewWindow) -> serde_json::Value {
+async fn dev_devtools(app: tauri::AppHandle, window: tauri::WebviewWindow) -> serde_json::Value {
     if !extras::dev_ok() { return serde_json::json!({ "ok": false }); }
-    window.open_devtools();
-    serde_json::json!({ "ok": true })
+    if !RELEASE || DEVTOOLS.load(Ordering::SeqCst) || window.label() != "main" { window.open_devtools(); return serde_json::json!({ "ok": true }); }
+    // выпуск: окно создано без инструментов — открываем его заново уже с ними
+    DEVTOOLS.store(true, Ordering::SeqCst);
+    let h = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Some(m) = h.get_webview_window("main") { let _ = m.destroy(); }
+        let _ = tauri::async_runtime::spawn_blocking(|| std::thread::sleep(std::time::Duration::from_millis(300))).await;
+        if open_ui(h.clone()).await.is_ok() { if let Some(m) = h.get_webview_window("main") { m.open_devtools(); } }
+    });
+    serde_json::json!({ "ok": true, "reopen": true })
 }
 #[tauri::command] async fn perf_info(app: tauri::AppHandle) -> serde_json::Value { let d = data_dir(&app); tauri::async_runtime::spawn_blocking(move || extras::perf(&d)).await.unwrap_or(serde_json::Value::Null) }
 #[tauri::command] fn perf_slow(app: tauri::AppHandle, v: bool) -> bool { extras::perf_slow(&data_dir(&app), v); true }
@@ -753,7 +769,7 @@ pub fn run() {
                 responder.respond(r);
             });
         })
-        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams, lab_ya_log, lab_ya_log_last, lab_ya_recent, lab_nav_log, local_list, local_pick, local_pick_files, local_add, local_remove, local_rescan, local_hide, local_unhide, local_reveal, dsd_info, pack_info, dsd_convert, migrate_status, migrate_applied, migrate_restored, migrate_rerun, migrate_restore, social_get, social_set, social_old, ya_add, token_set, ya_login, engine_create, engine_drop, engine_open, engine_play, engine_pause, engine_seek, engine_volume, engine_rate, engine_state, engine_eq, engine_tap, engine_info, engine_stats, engine_devices, engine_set_device, upd_check, upd_prepare, upd_install, upd_restart, upd_ready, upd_test_feed, cd_piece, cd_drives, cd_begin, cd_put, cd_burn, cd_eject, cd_cancel, cdw_pick_files, cdw_pick_folder, cdw_add_paths, cdw_pick_out, cdw_open, cdw_write, cdw_finish, cdw_abort, cdw_reveal, discord_enable, discord_set, discord_state, online_get, dev_unlock, dev_devtools, perf_info, perf_slow, perf_unsafe, perf_relaunch, audio_cors, app_version])
+        .invoke_handler(tauri::generate_handler![pick_files, save_report, env_info, open_ui, ya_fmt, lab_streams, lab_ya_log, lab_ya_log_last, lab_ya_recent, lab_nav_log, local_list, local_pick, local_pick_files, local_add, local_remove, local_rescan, local_hide, local_unhide, local_reveal, dsd_info, pack_info, dsd_convert, migrate_status, migrate_applied, migrate_restored, migrate_rerun, migrate_restore, social_get, social_set, social_old, ya_add, token_set, ya_login, engine_create, engine_drop, engine_open, engine_play, engine_pause, engine_seek, engine_volume, engine_rate, engine_state, engine_eq, engine_tap, engine_info, engine_stats, engine_devices, engine_devices_info, engine_set_device, upd_check, upd_prepare, upd_install, upd_restart, upd_ready, upd_test_feed, cd_piece, cd_drives, cd_begin, cd_put, cd_burn, cd_eject, cd_cancel, cdw_pick_files, cdw_pick_folder, cdw_add_paths, cdw_pick_out, cdw_open, cdw_write, cdw_finish, cdw_abort, cdw_reveal, discord_enable, discord_set, discord_state, online_get, dev_unlock, dev_devtools, perf_info, perf_slow, perf_unsafe, perf_relaunch, audio_cors, app_version])
         .build(tauri::generate_context!())
         .expect("не удалось запустить Пульс (Tauri)")
         .run(|app, ev| match ev {
