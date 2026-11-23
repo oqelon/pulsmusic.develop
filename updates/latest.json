@@ -1,16 +1,16 @@
 {
-  "version": "0.45.1",
-  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.45.1/pulse-app-0.45.1.zip",
-  "sha256": "894ed97fe3649b3819809026a5d47fad29d9f0d027574c2d421e11844d5dc2ad",
+  "version": "0.46.0",
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.46.0/pulse-app-0.46.0.zip",
+  "sha256": "57fe6d120704687ff9997ce7d5b1d6508086c23158cb95dfb5f1c3c29ff7edf6",
   "size": 1155194,
   "minElectron": "33.2.1",
-  "date": "2026-11-23",
+  "date": "2026-11-24",
   "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
   "notes": [
-    "Белая тема: фото исполнителя в шапке плавно уходит в белый слева и снизу — как в тёмной, имя и кнопки тёмные",
-    "Белая тема: экран входа, просмотр обложки, подсказки и награды подогнаны под светлый фон"
+    "Запись CD: настоящий ход записи — проценты и этапы приходят от системы, овалы этапов заполняются",
+    "Окно перед записью: скорость из тех, что умеет привод, пауза между треками или «без пауз», закрыть диск или оставить открытым, извлечь после записи"
   ],
   "engine": "tauri",
   "online": "https://pulse-online.pulsmusic.workers.dev",
-  "sig": "9Ylb59XPeDBnCZ6EERvhGWpIj4FcE0KD+RscQWUqPjfmx9mCRCQJPJlJjeS1e6T2hd6rr2j0Bs0iH9hNadY5AQ=="
+  "sig": "krjWK+tXKtVkGh/gAb9d0AdvvEdprUKXdo5XE9J/FY10S0qhU/xTo6ZqRt83rnLjjHcMv6Zn100s4UToJx2YBw=="
 }

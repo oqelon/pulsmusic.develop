@@ -1,0 +1,16 @@
+{
+  "version": "0.46.0",
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.46.0/pulse-app-0.46.0.zip",
+  "sha256": "57fe6d120704687ff9997ce7d5b1d6508086c23158cb95dfb5f1c3c29ff7edf6",
+  "size": 1155194,
+  "minElectron": "33.2.1",
+  "date": "2026-11-24",
+  "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
+  "notes": [
+    "Запись CD: настоящий ход записи — проценты и этапы приходят от системы, овалы этапов заполняются",
+    "Окно перед записью: скорость из тех, что умеет привод, пауза между треками или «без пауз», закрыть диск или оставить открытым, извлечь после записи"
+  ],
+  "engine": "tauri",
+  "online": "https://pulse-online.pulsmusic.workers.dev",
+  "sig": "krjWK+tXKtVkGh/gAb9d0AdvvEdprUKXdo5XE9J/FY10S0qhU/xTo6ZqRt83rnLjjHcMv6Zn100s4UToJx2YBw=="
+}
