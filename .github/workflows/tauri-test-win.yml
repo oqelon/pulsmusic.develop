@@ -40,6 +40,9 @@ jobs:
       - name: Проверки Rust (cargo test)
         working-directory: desktop-tauri/src-tauri
         run: cargo test --release -- --test-threads=4
+      - name: Запись CD — службы IMAPI2 и образ «без пауз» (без привода)
+        shell: powershell
+        run: powershell -NoProfile -STA -ExecutionPolicy Bypass -File desktop-tauri/tools/cd-probe-win.ps1
       - name: Сборка
         working-directory: desktop-tauri
         env:

@@ -42,6 +42,13 @@ jobs:
         run: |
           (cd desktop-tauri/src-tauri && cargo test --release --target aarch64-apple-darwin lists_output_devices -- --nocapture 2>&1 | tail -15)
           swift desktop-tauri/tools/webkit-formats.swift desktop-tauri/lab-media opus.opus opus-long.opus fmt-opus-in.ogg webm-opus.webm webm-vorbis.webm ogg-vorbis.ogg alac-16-44.m4a flac-16-44.flac wavpack.wv
+      - name: Запись CD — служба DiscRecording из osascript (без привода)
+        continue-on-error: true
+        run: |
+          W=desktop-tauri/lab-media/wav-16-44.wav
+          osascript -l JavaScript desktop-tauri/src-tauri/src/cd-mac/dr.js probe "$PWD/$W" "$PWD/$W" "$PWD/$W"
+          osascript -l JavaScript desktop-tauri/src-tauri/src/cd-mac/dr.js list
+          drutil help burn 2>&1 | head -60 || true
       - name: Сборка
         working-directory: desktop-tauri
         env:
