@@ -17,7 +17,7 @@ const out = path.join(os.tmpdir(), 'pulse-tauri-ui-' + process.pid);
 rmSync(out, { recursive: true, force: true });
 mkdirSync(path.join(out, 'dist'), { recursive: true });
 await build({
-  entryPoints: [path.join(src, 'src/main.jsx')], bundle: true, minify: true, outfile: path.join(out, 'dist/app.js'), format: 'iife', target: 'chrome120',
+  entryPoints: [path.join(src, 'src/main.jsx')], bundle: true, minify: true, outfile: path.join(out, 'dist/app.js'), format: 'iife', target: ['chrome120', 'safari15'],   // safari15: Mac (WebKit) — esbuild добавит -webkit- (user-select, backdrop-filter…)
   jsx: 'automatic', loader: { '.js': 'jsx', '.png': 'dataurl', '.woff': 'dataurl' },
   define: { 'process.env.NODE_ENV': '"production"' }, logLevel: 'warning', absWorkingDir: src,
   nodePaths: process.env.ESBUILD_DIR ? [path.join(process.env.ESBUILD_DIR, 'node_modules')] : [],
@@ -25,7 +25,7 @@ await build({
 copyFileSync(path.join(src, 'src/index.html'), path.join(out, 'dist/index.html'));
 const V = path.join(src, 'src/vendor/three-r128/');
 const vendor = ['three.min.js', 'CopyShader.js', 'LuminosityHighPassShader.js', 'EffectComposer.js', 'ShaderPass.js', 'RenderPass.js', 'UnrealBloomPass.js', 'RoomEnvironment.js', 'RoundedBoxGeometry.js'].map((f) => readFileSync(V + f, 'utf8')).join('\n;\n');
-const own = await transform(readFileSync(path.join(src, 'src/features/achievements/ach3d.js'), 'utf8'), { minify: true, target: 'chrome120' });
+const own = await transform(readFileSync(path.join(src, 'src/features/achievements/ach3d.js'), 'utf8'), { minify: true, target: ['chrome120', 'safari15'] });
 writeFileSync(path.join(out, 'dist/ach3d.js'), '/* three.js r128 — MIT License, (c) 2010-2021 three.js authors */\n' + vendor + '\n;\n' + own.code);
 const zip = path.join(here, '..', 'app-dist.zip');
 rmSync(zip, { force: true });
