@@ -1,0 +1,18 @@
+{
+  "version": "0.45.0",
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.45.0/pulse-app-0.45.0.zip",
+  "sha256": "d7ab4629a20daea83101167c9ec2ed7c898d3a4f6096616aa84e8992270ffeb3",
+  "size": 1155194,
+  "minElectron": "33.2.1",
+  "date": "2026-11-23",
+  "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
+  "notes": [
+    "Белая тема: Профиль → Оформление → «Белая» (или Ctrl+K → «Белая тема»)",
+    "Старые архивные темы убраны — осталась основная, тёмная и белая; программа стала легче",
+    "В «Звуке» снова видно, какое качество выбрано, и метку Lossless",
+    "Windows: кнопки окна видны на любом фоне"
+  ],
+  "engine": "tauri",
+  "online": "https://pulse-online.pulsmusic.workers.dev",
+  "sig": "U5EoHpSq/WcJAjVGUiT5rEnHGQb3QHLBrlEU1dQeMK/tnUCJ7jDOFp93PR5VwjjTjd4cRaaJgDCTWKP7NGjHBg=="
+}

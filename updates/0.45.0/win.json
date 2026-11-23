@@ -1,0 +1,10 @@
+{
+  "version": "0.45.0",
+  "engine": "tauri",
+  "x64": {
+    "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.45.0/Pulse-Windows-Setup.exe",
+    "sha256": "2258c70cc5395725aa5d98b6270559de025f9cbf5c714e1e9bff0ca7ecad8c86",
+    "size": 3752130,
+    "sig": "G88zPb6x6IgpkVQL2oW0dxZxLZykY1C34BWe+xAdReFMxkEcDsLAtVdYikR4uD7lF6VWTusXjp3WU4bDFKTaDQ=="
+  }
+}
