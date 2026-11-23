@@ -1,18 +1,17 @@
 {
-  "version": "0.43.0",
-  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.43.0/pulse-app-0.43.0.zip",
-  "sha256": "222788c67806c21d478d0e407ebe7fb91daa13ac231c2adb037362ce280e6e90",
+  "version": "0.44.0",
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.44.0/pulse-app-0.44.0.zip",
+  "sha256": "034b2c32bf26db76ac35c5f7c7cafb23406c0bd54cd76ce8b9dfceac8df47d39",
   "size": 1155194,
   "minElectron": "33.2.1",
   "date": "2026-11-23",
   "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
   "notes": [
-    "Карточка исполнителя: фото от края до края, под поиском; ровные отступы между буквами в имени",
-    "Достижения: 7 наград с уровнями — бронза, серебро, золото, алмаз, рубин; живые значки и значки в профиле",
-    "Mac: текст больше не выделяется где попало, матовое стекло — как задумано",
-    "Исправлено: пустая полоса внизу без плеера, «играет» после ошибки звука, цвет точек популярных треков"
+    "Карточка исполнителя: фото видно и под поиском, без полосы сверху; имя и кнопки уходят плавно, только у самого поиска",
+    "Прокрутка исполнителя плавнее: без размытия, звёзды викторины не крутятся за экраном",
+    "Окно не замирает, пока работают диск, библиотека и запись CD; визуализаторы легче"
   ],
   "engine": "tauri",
   "online": "https://pulse-online.pulsmusic.workers.dev",
-  "sig": "QVAm8GKDYZlPj0pP7rX6y94LErkeelH480b/Sdw1jfFZyD5OqCYrDIsuqwkAvc3hREvGrc4vT1cxCdFBH9psCQ=="
+  "sig": "2V8kVVumjAauWiFqJ0zcGBQr7+F5zcMS9QpG/5h/yQKYv9i6Ixs1z2+mzZM2fhRP62CCQwFg0DsIMb/jYdLmAg=="
 }

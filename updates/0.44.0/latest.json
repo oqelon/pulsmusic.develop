@@ -1,0 +1,17 @@
+{
+  "version": "0.44.0",
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.44.0/pulse-app-0.44.0.zip",
+  "sha256": "034b2c32bf26db76ac35c5f7c7cafb23406c0bd54cd76ce8b9dfceac8df47d39",
+  "size": 1155194,
+  "minElectron": "33.2.1",
+  "date": "2026-11-23",
+  "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
+  "notes": [
+    "Карточка исполнителя: фото видно и под поиском, без полосы сверху; имя и кнопки уходят плавно, только у самого поиска",
+    "Прокрутка исполнителя плавнее: без размытия, звёзды викторины не крутятся за экраном",
+    "Окно не замирает, пока работают диск, библиотека и запись CD; визуализаторы легче"
+  ],
+  "engine": "tauri",
+  "online": "https://pulse-online.pulsmusic.workers.dev",
+  "sig": "2V8kVVumjAauWiFqJ0zcGBQr7+F5zcMS9QpG/5h/yQKYv9i6Ixs1z2+mzZM2fhRP62CCQwFg0DsIMb/jYdLmAg=="
+}
