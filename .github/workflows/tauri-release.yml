@@ -99,5 +99,5 @@ jobs:
           VER=$(tr -d ' \r\n' < desktop-tauri/RELEASE)
           ls -la out
           sha256sum out/*
-          gh release create "v$VER" out/* -R "$GITHUB_REPOSITORY" --latest=false --target "$GITHUB_SHA" --title "Пульс $VER — новая версия (Tauri)" --notes "Новая версия «Пульса»: свой звуковой движок. Обычный «Пульс» обновится на неё сам." \
+          gh release create "v$VER" out/* -R "$GITHUB_REPOSITORY" --latest=false --target "$GITHUB_SHA" --title "Пульс $VER — версия Альфа" --notes "Пульс $VER — версия Альфа." \
             || gh release upload "v$VER" out/* -R "$GITHUB_REPOSITORY" --clobber
