@@ -1,6 +1,7 @@
 # Выпуск Tauri-версии «Пульса» (Mac Apple M, Mac Intel, Windows x64). Запускается отправкой ветки tauri-release
 # (версия — в desktop-tauri/RELEASE) или вручную. Собирает выпускной вариант (без «Лаборатории» и тестовых файлов,
 # Pulse.app / установщик Windows, идентификатор ru.pulse.desktop) и кладёт архивы в релиз v<версия> (не «последний»).
+# Для Mac — два файла: .zip (его берёт обновление внутри программы, на нём подпись) и .dmg (его скачивают с сайта).
 # Подписи (mac.json, win.json, latest.json) ставит разработчик своим ключом и кладёт в updates/<версия>/ ветки main —
 # только тогда обновление увидят программы. Ключа здесь нет.
 name: Tauri — выпуск
@@ -54,7 +55,7 @@ jobs:
           echo "$VER" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "версия: $VER"; exit 1; }
           rm -f ui/lab.html
           VER=$VER node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('src-tauri/tauri.release.conf.json','utf8'));c.version=process.env.VER;fs.writeFileSync('rel.conf.json',JSON.stringify(c,null,2));fs.writeFileSync('app-meta/package.json',JSON.stringify({name:'pulse',productName:'Пульс',version:process.env.VER,engine:'tauri',build:0},null,2)+'\n')"
-          if [ "${{ matrix.kind }}" = mac ]; then B=app; else B=nsis; fi
+          if [ "${{ matrix.kind }}" = mac ]; then B=app,dmg; else B=nsis; fi
           npx --yes @tauri-apps/cli@2 build --target ${{ matrix.target }} --bundles $B --ci --config rel.conf.json
       - name: Упаковка (Mac)
         if: matrix.kind == 'mac'
@@ -66,6 +67,10 @@ jobs:
           /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$B/Pulse.app/Contents/Info.plist"
           codesign --verify --deep "$B/Pulse.app" && echo "codesign --verify --deep: ок"
           mkdir -p out && ditto -c -k --keepParent "$B/Pulse.app" "out/${{ matrix.out }}"
+          # образ диска для сайта: Pulse.app и ярлык «Программы» — открыл и перетащил
+          OUT="${{ matrix.out }}"; DMG="$(ls "$B"/../dmg/*.dmg | head -1)"; test -n "$DMG"
+          hdiutil verify "$DMG" && echo "hdiutil verify: ок"
+          cp "$DMG" "out/${OUT%.zip}.dmg"
           du -sh out/*
       - name: Упаковка (Windows)
         if: matrix.kind == 'win'
@@ -77,7 +82,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.kind }}-${{ matrix.target }}
-          path: out/${{ matrix.out }}
+          path: out/
   publish:
     needs: build
     runs-on: ubuntu-latest
