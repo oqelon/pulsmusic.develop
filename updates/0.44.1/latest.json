@@ -1,0 +1,18 @@
+{
+  "version": "0.44.1",
+  "url": "https://github.com/oqelon/pulsmusic.develop/releases/download/v0.44.1/pulse-app-0.44.1.zip",
+  "sha256": "8656c67449d5cf3e75df4b1570e77c2194b758bbd14869595369c4c9cd387745",
+  "size": 1155194,
+  "minElectron": "33.2.1",
+  "date": "2026-11-23",
+  "installer": "https://github.com/oqelon/pulsmusic.develop/releases/latest",
+  "notes": [
+    "Звуковая карта: если устройство занято другой программой, «Пульс» скажет какой и пока играет на системном, а потом переключится сам",
+    "Чаты снова получают сообщения на этом компьютере, старые можно открыть кнопкой",
+    "Перезапуск после обновления и номер версии исправлены; «Проверить элемент» убран из меню",
+    "Карточка исполнителя: фото до края без затемнения и без тёмной полосы после простоя; запись CD и WAV снова бит в бит"
+  ],
+  "engine": "tauri",
+  "online": "https://pulse-online.pulsmusic.workers.dev",
+  "sig": "Dk59Zplir0mewXTlBXo1PoPbPWnLjkNrhdPlAEGNR6MM3iw9XuXbbk8IRCHYqPN5oU9kVejcWVgLjufbq5hnDg=="
+}
