@@ -1363,21 +1363,21 @@ mod tests {
         // (его разжимает окно), как задумано
         let lab = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../lab-media");
         let own = ["mp3-320.mp3", "fmt-vbr.mp3", "aac-256.m4a", "fmt-aac.m4b", "fmt-aac.mp4", "fmt-adts.aac", "flac-16-44.flac", "flac-24-96.flac", "flac-24-192.flac",
-            "flac-in-mp4.m4a", "alac-16-44.m4a", "fmt-alac.caf", "wav-16-44.wav", "wav-24-96.wav", "fmt-f32-48.wav", "aiff-16-44.aif", "fmt-s24.aiff", "fmt-s16-48.aifc",
+            "flac-in-mp4.m4a", "alac-16-44.m4a", "wav-16-44.wav", "wav-24-96.wav", "fmt-f32-48.wav", "aiff-16-44.aif", "fmt-s24.aiff", "fmt-s16-48.aifc",
             "ogg-vorbis.ogg", "fmt-vorbis.oga", "wavpack.wv", "wv-f32.wv", "ape-s16-5000-3990.ape", "ape-s24-3000-3980.ape"];
         let win = ["opus.opus", "fmt-opus-in.ogg", "webm-opus.webm", "webm-vorbis.webm"];
         let mut bad = Vec::new();
         for (i, name) in own.iter().chain(win.iter()).enumerate() {
             let id = format!("fmt-{i}");
             crate::localfile::register(&id, crate::localfile::Src::File(lab.join(name)));
-            match crate::cd::piece(&id, 0.0, 0.9) {
+            match crate::cd::piece(&id, 0.0, 0.4) {
                 Err(e) => bad.push(format!("{name}: {e}")),
                 Ok(b) if win.contains(name) => { if b[0] != 0 { bad.push(format!("{name}: ждали файл целиком для окна")); } }
                 Ok(b) => {
                     if b[0] != 1 { bad.push(format!("{name}: движок не разжал (файл целиком)")); continue; }
                     let n = (b.len() - 1 - 44) / 6;
                     let peak = b[45..].chunks(3).map(|c| (i32::from_le_bytes([0, c[0], c[1], c[2]]) >> 8).unsigned_abs()).max().unwrap_or(0);
-                    if (n as i64 - 39690).abs() > 2 { bad.push(format!("{name}: {n} отсчётов вместо 39690")); }
+                    if (n as i64 - 17640).abs() > 2 { bad.push(format!("{name}: {n} отсчётов вместо 17640")); }
                     if peak < 100_000 { bad.push(format!("{name}: тишина (пик {peak})")); }
                 }
             }

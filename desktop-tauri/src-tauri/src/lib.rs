@@ -43,7 +43,9 @@ use tauri_plugin_dialog::DialogExt;
 pub const RELEASE: bool = option_env!("PULSE_RELEASE").is_some();
 const KEY_USER: &str = "yandex-token";
 const CHUNK: u64 = 4 * 1024 * 1024;
-const AUDIO_EXT: &[&str] = &["flac", "mp3", "m4a", "m4b", "aac", "mp4", "ogg", "oga", "opus", "webm", "weba", "wav", "aif", "aiff", "alac", "caf", "wv", "ape", "dsf", "dff"];
+// 0.44.1 ровно то, что разбирает медиатека (library::audio_codec): раньше тут были mp4, alac и caf — выбрать их было
+// можно, но в «Мою музыку» они не попадали (а CAF на Windows не играет вовсе)
+const AUDIO_EXT: &[&str] = &["flac", "mp3", "m4a", "m4b", "aac", "ogg", "oga", "opus", "webm", "weba", "wav", "aif", "aiff", "aifc", "wv", "ape", "dsf", "dff"];
 
 static PICK_SEQ: AtomicU64 = AtomicU64::new(1);
 
@@ -783,6 +785,11 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn picker_formats_are_indexed() {
+        // всё, что можно выбрать в «Добавить файлы», медиатека правда разбирает
+        for e in super::AUDIO_EXT { assert!(crate::library::audio_codec(e).is_some(), "{e}: выбрать можно, а в медиатеку не попадёт"); }
+    }
     #[test]
     fn token_from_redirect() {
         use super::token_from_url as t;
