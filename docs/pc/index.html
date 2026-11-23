@@ -7,14 +7,14 @@
 <meta name="description" content="Последняя версия «Пульса» для Windows 10 и 11 и для Mac — Apple Silicon и Intel.">
 <meta property="og:title" content="«Пульс» для компьютера"><meta property="og:description" content="Музыка нового поколения. Скачайте последнюю версию для Windows и Mac.">
 <meta property="og:image" content="https://oqelon.github.io/pulsmusic.develop/assets/og.jpg">
-<meta name="theme-color" content="#161616">
+<meta name="theme-color" content="#0A0A0A">
 <link rel="icon" href="../assets/apple-touch-icon.png"><link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&family=Manrope:wght@700;800&display=swap">
 <style>
-/* Страница скачивания в новом дизайне «Пульса»: тёмно-серый, арбузный и сакура, знак на стеклянной плитке, оси знака на всю ширину */
-:root { --bg: #161616; --s1: #202020; --s2: #2C2C2C; --dk: #121212; --ink: #F6F5F2; --ink2: rgba(246,245,242,.66); --ink3: rgba(246,245,242,.45);
-  --line: rgba(246,245,242,.10); --wm: #FC6C85; --sk: #FFB7C5; --deep: #C64B60; --grey: #8A8A8A;
+/* Страница скачивания в цветах приложения: чёрный и шкала серых, без градиентов и подсветок; знак — белый на плоской плитке, оси знака на всю ширину */
+:root { --bg: #0A0A0A; --s1: #171717; --s2: #262626; --dk: #0A0A0A; --ink: #FAFAFA; --ink2: #A3A3A3; --ink3: #737373;
+  --line: #262626; --l2: #373737; --wm: #FAFAFA; --sk: #D4D4D4; --deep: #525252; --grey: #8A8A8A;
   --f: "Onest", "Segoe UI", system-ui, -apple-system, sans-serif; --fd: "Manrope", "Onest", system-ui, sans-serif; color-scheme: dark; }
 * { box-sizing: border-box; }
 html, body { margin: 0; }
@@ -28,99 +28,85 @@ a { color: var(--sk); } a:hover { color: var(--ink); }
 header .in { padding-top: 24px; padding-bottom: 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 28px; }
 .home { display: flex; align-items: center; gap: 12px; color: var(--ink); text-decoration: none; font-size: 17px; font-weight: 700; }
 nav { display: flex; flex-wrap: wrap; gap: 8px 24px; font-size: 15px; font-weight: 500; }
-nav a { color: rgba(246,245,242,.70); text-decoration: none; }
+nav a { color: var(--ink2); text-decoration: none; } nav a:hover { color: var(--ink); }
 .grow { flex-grow: 1; }
-.pill { height: 44px; padding: 0 20px; display: inline-flex; align-items: center; border-radius: 22px; background: var(--ink); color: #121212; font-size: 14px; font-weight: 700; text-decoration: none; }
-.pill:hover { color: #121212; box-shadow: 0 0 0 4px rgba(255,183,197,.22); }
+.pill { height: 44px; padding: 0 20px; display: inline-flex; align-items: center; border-radius: 22px; background: var(--ink); color: #0A0A0A; font-size: 14px; font-weight: 700; text-decoration: none; transition: background-color .15s; }
+.pill:hover { color: #0A0A0A; background: #D4D4D4; }
 
 /* первый экран */
-.hero { position: relative; overflow-x: clip; border-top: 1px solid rgba(246,245,242,.08); }
+.hero { position: relative; overflow-x: clip; border-top: 1px solid var(--line); }
 .hero .in { padding-top: 72px; padding-bottom: 96px; display: flex; flex-wrap: wrap; align-items: center; gap: 48px; }
 .copy { flex: 1 1 460px; min-width: 0; align-self: stretch; display: grid; grid-template-rows: 1fr 1fr; row-gap: 48px; }
 .copy .top { display: flex; flex-direction: column; justify-content: flex-end; gap: 20px; }
 .copy .bot { display: flex; flex-direction: column; justify-content: flex-start; gap: 22px; padding-top: 5px; }
-.kick { font-size: 13px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--sk); }
+.kick { font-size: 13px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--ink2); }
 h1 { margin: 0; font-family: var(--fd); font-size: clamp(40px, 6vw, 76px); font-weight: 800; line-height: 1.02; letter-spacing: -.03em; text-wrap: balance; }
 .lede { margin: 0; max-width: 520px; font-size: 18px; line-height: 1.5; color: var(--ink2); }
 .acts { display: flex; flex-wrap: wrap; gap: 10px; }
-.big { height: 56px; padding: 0 26px; display: inline-flex; align-items: center; gap: 10px; border-radius: 28px; background: var(--wm); color: #121212; font-size: 16px; font-weight: 700; text-decoration: none; transition: transform .15s, box-shadow .2s; }
-.big:hover { color: #121212; box-shadow: 0 0 0 4px rgba(252,108,133,.28); } .big:active { transform: scale(.98); }
+.big { height: 56px; padding: 0 26px; display: inline-flex; align-items: center; gap: 10px; border-radius: 28px; background: var(--ink); color: #0A0A0A; font-size: 16px; font-weight: 700; text-decoration: none; transition: transform .15s, background-color .15s; }
+.big:hover { color: #0A0A0A; background: #D4D4D4; } .big:active { transform: scale(.98); }
 .big svg { width: 18px; height: 18px; }
-.ghost { height: 56px; padding: 0 22px; display: inline-flex; align-items: center; border-radius: 28px; border: 1px solid rgba(246,245,242,.20); color: var(--ink); font-size: 16px; font-weight: 600; text-decoration: none; }
-.ghost:hover { border-color: rgba(246,245,242,.45); color: var(--ink); }
+.ghost { height: 56px; padding: 0 22px; display: inline-flex; align-items: center; border-radius: 28px; border: 1px solid var(--l2); color: var(--ink); font-size: 16px; font-weight: 600; text-decoration: none; transition: background-color .15s; }
+.ghost:hover { background: var(--s1); color: var(--ink); }
 .vline { font-size: 13px; color: var(--ink3); font-variant-numeric: tabular-nums; }
 .art { flex: 1 1 380px; min-width: 0; display: flex; justify-content: center; position: relative; }
 .axis { position: absolute; left: -3000px; right: -3000px; top: 50%; height: 1px; margin-top: -.5px; background: var(--line); pointer-events: none; }
 
-/* стеклянная плитка со знаком */
-.gl-tile { position: relative; width: min(100%, 460px); aspect-ratio: 1; border-radius: 22.6%; isolation: isolate; }
-.gl-light { position: absolute; border-radius: 50%; filter: blur(46px); z-index: -1; pointer-events: none; }
-.gl-l1 { right: -6%; top: -8%; width: 62%; height: 62%; background: var(--wm); opacity: .55; }
-.gl-l2 { left: -10%; bottom: -10%; width: 55%; height: 55%; background: var(--sk); opacity: .30; }
-.gl-l3 { left: 30%; top: 30%; width: 40%; height: 40%; background: #9FD8FF; opacity: .10; }
-.gl-body { position: absolute; inset: 0; border-radius: inherit; overflow: hidden;
-  background: linear-gradient(150deg, rgba(255,255,255,.13), rgba(255,255,255,.03) 42%, rgba(255,255,255,.06));
-  -webkit-backdrop-filter: blur(28px) saturate(170%); backdrop-filter: blur(28px) saturate(170%);
-  box-shadow: inset 0 1.5px 0 rgba(255,255,255,.40), inset 0 0 0 1px rgba(255,255,255,.10), inset 0 -40px 80px rgba(0,0,0,.35), inset 0 40px 80px rgba(255,255,255,.04), 0 40px 90px rgba(0,0,0,.55); }
+/* плитка со знаком: плоская, как иконка приложения — без стекла, подсветок и радужной кромки */
+.gl-tile { position: relative; width: min(100%, 460px); aspect-ratio: 1; border-radius: 22.6%; background: var(--s1); box-shadow: inset 0 0 0 1px var(--line); overflow: hidden; }
 .gl-ax { position: absolute; background: var(--line); }
 .gl-ax-v { left: 50%; top: 0; bottom: 0; width: 1px; margin-left: -.5px; }
 .gl-ax-h { left: 0; right: 0; top: 50%; height: 1px; margin-top: -.5px; }
-.gl-mk { position: absolute; left: 14%; top: 14%; width: 72%; height: 72%; overflow: visible; }
-.gl-rim { position: absolute; inset: 0; border-radius: inherit; padding: 2px; pointer-events: none;
-  background: conic-gradient(from 210deg, rgba(255,255,255,0) 0deg, #FFB7C5 40deg, #FFFFFF 70deg, #9FD8FF 100deg, rgba(255,255,255,0) 150deg, rgba(255,255,255,0) 200deg, #FC6C85 250deg, #FFFFFF 285deg, #C9B8FF 315deg, rgba(255,255,255,0) 360deg);
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
-  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
-.gl-rim-soft { padding: 6px; filter: blur(10px); opacity: .75; }
+.gl-mk { position: absolute; left: 14%; top: 14%; width: 72%; height: 72%; }
 
 /* разделы */
 section.blk .in { padding-top: 88px; padding-bottom: 40px; display: flex; flex-direction: column; gap: 28px; }
 .head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 20px; }
 h2 { margin: 0; font-family: var(--fd); font-size: clamp(28px, 3.4vw, 40px); font-weight: 800; letter-spacing: -.02em; line-height: 1.1; }
-.sub { font-size: 15px; color: rgba(246,245,242,.55); }
+.sub { font-size: 15px; color: var(--ink2); }
 
 /* скачать */
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
 .card { position: relative; overflow: hidden; border-radius: 24px; background: var(--s1); padding: 28px; display: flex; flex-direction: column; gap: 14px; min-height: 270px; min-width: 0; }
-.card.me { box-shadow: inset 0 0 0 1px rgba(252,108,133,.55); }
-.q { position: absolute; right: 24px; top: 24px; width: 64px; height: 64px; border-radius: 16px; overflow: hidden; }
-.q i { position: absolute; width: 64%; height: 64%; }
-.q i:first-child { left: 0; top: 0; border-radius: 0 0 100% 0; }
-.q i:last-child { right: 0; bottom: 0; border-radius: 100% 0 0 0; }
-.os { font-size: 13px; font-weight: 600; color: rgba(246,245,242,.50); }
-.tag { align-self: flex-start; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 10px; background: rgba(252,108,133,.16); color: var(--sk); margin-top: -4px; }
+.card.me { box-shadow: inset 0 0 0 1px var(--ink3); }
+.q { position: absolute; right: 24px; top: 24px; width: 64px; height: 64px; border-radius: 16px; background: var(--s2); color: var(--ink); display: grid; place-items: center; }
+.q svg { width: 36px; height: 36px; }
+.card.me .q { background: var(--ink); color: #0A0A0A; }
+.os { font-size: 13px; font-weight: 600; color: var(--ink3); }
+.tag { align-self: flex-start; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 10px; background: var(--s2); color: var(--ink); margin-top: -4px; }
 .card h3 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -.01em; line-height: 1.15; padding-right: 76px; }
-.req { font-size: 14px; line-height: 1.45; color: rgba(246,245,242,.62); }
+.req { font-size: 14px; line-height: 1.45; color: var(--ink2); }
 .meta { font-size: 13px; color: var(--ink3); font-variant-numeric: tabular-nums; min-height: 20px; overflow-wrap: anywhere; }
-.btn { margin-top: auto; height: 50px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border-radius: 25px; border: 1px solid rgba(246,245,242,.22); color: var(--ink); font-size: 15px; font-weight: 600; text-decoration: none; transition: transform .15s, box-shadow .2s; }
-.btn:hover { color: var(--ink); border-color: rgba(246,245,242,.45); } .btn:active { transform: scale(.98); }
-.card.me .btn { background: var(--ink); color: #121212; border-color: var(--ink); font-weight: 700; }
-.card.me .btn:hover { box-shadow: 0 0 0 4px rgba(255,183,197,.25); }
+.btn { margin-top: auto; height: 50px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border-radius: 25px; border: 1px solid var(--l2); color: var(--ink); font-size: 15px; font-weight: 600; text-decoration: none; transition: transform .15s, background-color .15s; }
+.btn:hover { color: var(--ink); background: var(--s2); } .btn:active { transform: scale(.98); }
+.card.me .btn { background: var(--ink); color: #0A0A0A; border-color: var(--ink); font-weight: 700; }
+.card.me .btn:hover { background: #D4D4D4; border-color: #D4D4D4; }
 .btn svg { width: 18px; height: 18px; }
 
 /* возможности */
 .feats { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); border-top: 1px solid var(--line); }
 .feat { padding: 36px 32px 40px 0; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 12px; }
 .feat b { font-size: 22px; font-weight: 700; letter-spacing: -.01em; }
-.feat span { font-size: 15px; line-height: 1.55; color: rgba(246,245,242,.62); max-width: 460px; }
+.feat span { font-size: 15px; line-height: 1.55; color: var(--ink2); max-width: 460px; }
 
 /* что нового */
-.news-box { border-radius: 32px; background: var(--ink); color: #121212; padding: clamp(28px, 4vw, 52px); display: flex; flex-wrap: wrap; gap: 32px 56px; align-items: flex-start; }
+.news-box { border-radius: 32px; background: var(--ink); color: #0A0A0A; padding: clamp(28px, 4vw, 52px); display: flex; flex-wrap: wrap; gap: 32px 56px; align-items: flex-start; }
 .news-box .l { flex: 1 1 320px; display: flex; flex-direction: column; gap: 12px; }
 .news-box .k { font-size: 13px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--deep); }
-.news-box p { margin: 0; font-size: 15px; line-height: 1.55; color: rgba(18,18,18,.70); }
+.news-box p { margin: 0; font-size: 15px; line-height: 1.55; color: #525252; }
 .news { flex: 1 1 380px; margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
-.news li { display: flex; gap: 14px; padding: 16px 0; border-bottom: 1px solid rgba(18,18,18,.12); font-size: 15px; line-height: 1.5; }
+.news li { display: flex; gap: 14px; padding: 16px 0; border-bottom: 1px solid #E5E5E5; font-size: 15px; line-height: 1.5; }
 .news li::before { content: ""; flex-shrink: 0; width: 14px; height: 14px; margin-top: 5px;
-  background: linear-gradient(var(--wm), var(--wm)) center / 2px 100% no-repeat, linear-gradient(var(--wm), var(--wm)) center / 100% 2px no-repeat; }
+  background: linear-gradient(#0A0A0A, #0A0A0A) center / 2px 100% no-repeat, linear-gradient(#0A0A0A, #0A0A0A) center / 100% 2px no-repeat; }
 
 /* Mac */
 .help { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
 .help div { border-radius: 24px; background: var(--s1); padding: 28px; }
 .help b { display: block; font-size: 18px; margin-bottom: 8px; }
-.help p { margin: 0; color: rgba(246,245,242,.66); font-size: 15px; }
+.help p { margin: 0; color: var(--ink2); font-size: 15px; }
 
-footer { border-top: 1px solid rgba(246,245,242,.08); margin-top: 56px; }
-footer .in { padding-top: 32px; padding-bottom: max(40px, env(safe-area-inset-bottom)); display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; font-size: 14px; color: rgba(246,245,242,.50); }
+footer { border-top: 1px solid var(--line); margin-top: 56px; }
+footer .in { padding-top: 32px; padding-bottom: max(40px, env(safe-area-inset-bottom)); display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; font-size: 14px; color: var(--ink3); }
 footer a { text-decoration: none; }
 @media (max-width: 720px) { .hero .in { padding-top: 40px; padding-bottom: 64px; } .copy { grid-template-rows: auto auto; row-gap: 28px; } .feat { padding-right: 0; } }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
@@ -130,7 +116,7 @@ footer a { text-decoration: none; }
 <header>
   <div class="in">
     <a class="home" href="#" aria-label="Пульс — в начало">
-      <svg class="mk" width="30" height="30" viewBox="23 23 100 100" aria-hidden="true"><path d="M71.5 23C71.5 49.7858 49.7858 71.5 23 71.5V74.5H71.5V123H74.5C74.5 96.2142 96.2142 74.5 123 74.5V71.5H74.5V23H71.5Z" fill="#FC6C85"/></svg>Пульс
+      <svg class="mk" width="30" height="30" viewBox="23 23 100 100" aria-hidden="true"><path d="M71.5 23C71.5 49.7858 49.7858 71.5 23 71.5V74.5H71.5V123H74.5C74.5 96.2142 96.2142 74.5 123 74.5V71.5H74.5V23H71.5Z" fill="#FAFAFA"/></svg>Пульс
     </a>
     <nav aria-label="Разделы">
       <a href="#features">Возможности</a>
@@ -153,7 +139,7 @@ footer a { text-decoration: none; }
       <div class="bot">
         <p class="lede">Поток под настроение, живой текст, редкие форматы без потерь и запись дисков — в одном спокойном плеере для Windows и Mac.</p>
         <div class="acts">
-          <a class="big" id="b-hero" href="https://github.com/oqelon/pulsmusic.develop/releases/latest/download/Pulse-Desktop-Alpha-Setup.exe"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg><span id="t-hero">Скачать для Windows</span></a>
+          <a class="big" id="b-hero" href="https://github.com/oqelon/pulsmusic.develop/releases/download/v0.44.1/Pulse-Windows-Setup.exe"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg><span id="t-hero">Скачать для Windows</span></a>
           <a class="ghost" id="g-hero" href="#download">Для Mac</a>
         </div>
         <span class="vline">Альфа-версия <span id="ver"></span> · бесплатно<span id="date"></span></span>
@@ -162,25 +148,8 @@ footer a { text-decoration: none; }
     <div class="art" aria-hidden="true">
       <div class="axis"></div>
       <div class="gl-tile">
-        <span class="gl-light gl-l1"></span><span class="gl-light gl-l2"></span><span class="gl-light gl-l3"></span>
-        <div class="gl-body">
-          <div class="gl-ax gl-ax-v"></div><div class="gl-ax gl-ax-h"></div>
-          <svg class="gl-mk" viewBox="23 23 100 100" overflow="visible">
-            <defs>
-              <linearGradient id="glmk" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset=".55" stop-color="#F6F5F2" stop-opacity=".92"/><stop offset="1" stop-color="#FFD9E1" stop-opacity=".85"/></linearGradient>
-              <filter id="glsoft" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation=".5"/></filter>
-              <filter id="glglow" x="-40%" y="-40%" width="180%" height="180%" color-interpolation-filters="sRGB">
-                <feGaussianBlur in="SourceAlpha" stdDeviation="3.4" result="b"/>
-                <feFlood flood-color="#FFB7C5" flood-opacity=".5"/><feComposite in2="b" operator="in" result="g"/>
-                <feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge>
-              </filter>
-            </defs>
-            <path d="M71.5 23C71.5 49.7858 49.7858 71.5 23 71.5V74.5H71.5V123H74.5C74.5 96.2142 96.2142 74.5 123 74.5V71.5H74.5V23H71.5Z" fill="#FC6C85" opacity=".55" transform="translate(-.9 -.6)" filter="url(#glsoft)"/>
-            <path d="M71.5 23C71.5 49.7858 49.7858 71.5 23 71.5V74.5H71.5V123H74.5C74.5 96.2142 96.2142 74.5 123 74.5V71.5H74.5V23H71.5Z" fill="#9FD8FF" opacity=".4" transform="translate(.9 .6)" filter="url(#glsoft)"/>
-            <path d="M71.5 23C71.5 49.7858 49.7858 71.5 23 71.5V74.5H71.5V123H74.5C74.5 96.2142 96.2142 74.5 123 74.5V71.5H74.5V23H71.5Z" fill="url(#glmk)" filter="url(#glglow)"/>
-          </svg>
-        </div>
-        <span class="gl-rim"></span><span class="gl-rim gl-rim-soft"></span>
+        <div class="gl-ax gl-ax-v"></div><div class="gl-ax gl-ax-h"></div>
+        <svg class="gl-mk" viewBox="23 23 100 100"><path d="M71.5 23C71.5 49.7858 49.7858 71.5 23 71.5V74.5H71.5V123H74.5C74.5 96.2142 96.2142 74.5 123 74.5V71.5H74.5V23H71.5Z" fill="#FAFAFA"/></svg>
       </div>
     </div>
   </div>
@@ -191,31 +160,31 @@ footer a { text-decoration: none; }
     <div class="head"><h2>Скачать</h2><span class="sub">Последняя версия для вашего компьютера</span></div>
     <div class="grid" id="grid">
       <article class="card" id="c-win">
-        <div class="q" style="background:#FC6C85"><i style="background:#F6F5F2"></i><i style="background:#121212"></i></div>
+        <div class="q"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="3.5" width="19" height="13" rx="2.5"/><path d="M9 20.5h6M12 16.5v4"/></svg></div>
         <span class="os">Windows</span>
         <span class="tag" hidden>Ваш компьютер</span>
         <h3>Windows 10 и 11</h3>
         <span class="req">Установщик для 64-битной Windows. Обновления приходят сами</span>
         <span class="meta" id="m-win"></span>
-        <a class="btn" id="b-win" href="https://github.com/oqelon/pulsmusic.develop/releases/latest/download/Pulse-Desktop-Alpha-Setup.exe"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg>Скачать установщик</a>
+        <a class="btn" id="b-win" href="https://github.com/oqelon/pulsmusic.develop/releases/download/v0.44.1/Pulse-Windows-Setup.exe"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg>Скачать установщик</a>
       </article>
       <article class="card" id="c-arm">
-        <div class="q" style="background:#F6F5F2"><i style="background:#FC6C85"></i><i style="background:#2C2C2C"></i></div>
+        <div class="q"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="4.5" width="15" height="15" rx="3"/><path d="M9 2v2.5M15 2v2.5M9 19.5V22M15 19.5V22M2 9h2.5M2 15h2.5M19.5 9H22M19.5 15H22"/><text x="12" y="12.2" text-anchor="middle" dominant-baseline="central" fill="currentColor" stroke="none" font-family="Onest, system-ui, sans-serif" font-weight="700" font-size="9">M</text></svg></div>
         <span class="os">macOS</span>
         <span class="tag" hidden>Ваш компьютер</span>
         <h3>Mac на Apple Silicon</h3>
         <span class="req">Для компьютеров с чипом Apple: M1 и новее · macOS 11 и новее</span>
         <span class="meta" id="m-arm"></span>
-        <a class="btn" id="b-arm" href="https://github.com/oqelon/pulsmusic.develop/releases/latest/download/Pulse-Mac-Apple-M.zip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg>Скачать для Apple Silicon</a>
+        <a class="btn" id="b-arm" href="https://github.com/oqelon/pulsmusic.develop/releases/download/v0.44.1/Pulse-Mac-Apple-M.zip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg>Скачать для Apple Silicon</a>
       </article>
       <article class="card" id="c-intel">
-        <div class="q" style="background:#8A8A8A"><i style="background:#F6F5F2"></i><i style="background:#FFB7C5"></i></div>
+        <div class="q"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="4.5" width="15" height="15" rx="3"/><path d="M9 2v2.5M15 2v2.5M9 19.5V22M15 19.5V22M2 9h2.5M2 15h2.5M19.5 9H22M19.5 15H22"/><text x="12" y="12.2" text-anchor="middle" dominant-baseline="central" fill="currentColor" stroke="none" font-family="Onest, system-ui, sans-serif" font-weight="700" font-size="6.4" letter-spacing="-.2">x64</text></svg></div>
         <span class="os">macOS</span>
         <span class="tag" hidden>Ваш компьютер</span>
         <h3>Mac на Intel</h3>
         <span class="req">Для компьютеров Mac с процессором Intel · macOS 11 и новее</span>
         <span class="meta" id="m-intel"></span>
-        <a class="btn" id="b-intel" href="https://github.com/oqelon/pulsmusic.develop/releases/latest/download/Pulse-Mac-Intel.zip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg>Скачать для Intel</a>
+        <a class="btn" id="b-intel" href="https://github.com/oqelon/pulsmusic.develop/releases/download/v0.44.1/Pulse-Mac-Intel.zip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg>Скачать для Intel</a>
       </article>
     </div>
   </div>
@@ -225,12 +194,12 @@ footer a { text-decoration: none; }
   <div class="in">
     <h2>Что умеет</h2>
     <div class="feats">
-      <div class="feat"><svg width="34" height="34" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1.5A10.5 10.5 0 0 1 1.5 12H12Z M12 22.5A10.5 10.5 0 0 1 22.5 12H12Z" fill="#FC6C85"/></svg><b>Мой пульс</b><span>Бесконечный поток, который подстраивается под то, что вы слушаете, — включил и забыл.</span></div>
-      <div class="feat"><svg width="34" height="34" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18v2.5H3zM3 10.75h12v2.5H3zM3 16.5h15v2.5H3z" fill="#FC6C85"/></svg><b>Живой текст</b><span>Строки песни идут в такт музыке: текущая — крупно, прошедшие и следующие — тише.</span></div>
-      <div class="feat"><svg width="34" height="34" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18.5V5l11-2v13.5a3 3 0 1 1-2-2.83V7.4l-7 1.27v9.83a3 3 0 1 1-2-2.83z" fill="#FC6C85"/></svg><b>Форматы без потерь</b><span>FLAC, APE, WavPack и WAV с вашего компьютера — без сторонних кодеков.</span></div>
-      <div class="feat"><svg width="34" height="34" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 7a3 3 0 1 1 0 6 3 3 0 0 1 0-6z" fill="#FC6C85" fill-rule="evenodd"/></svg><b>Диски и WAV для CD</b><span>Запись аудио-CD и перевод музыки в WAV для дисков: 16 бит, 44,1 кГц, стерео, с проверкой каждого файла.</span></div>
-      <div class="feat"><svg width="34" height="34" viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 3a4 4 0 1 1 0 8 4 4 0 0 1 0-8zM1.5 21c.6-4.4 3.4-7 7-7s6.4 2.6 7 7zM16.5 4.2a3.6 3.6 0 0 1 0 6.6M18 13.6c2.6.8 4 3.2 4.5 7.4h-4" fill="#FC6C85"/></svg><b>Статус у друзей</b><span>Что вы слушаете, видно в Discord и Telegram — с кнопкой, по которой друзья скачают «Пульс».</span></div>
-      <div class="feat"><svg width="34" height="34" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9h-3a6 6 0 1 1-6-6V3zM13.5 2v7.5H21z" fill="#FC6C85"/></svg><b>Тихие обновления</b><span>Новая версия скачивается в фоне, а ставится одной кнопкой — без нового установщика.</span></div>
+      <div class="feat"><svg width="34" height="34" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1.5A10.5 10.5 0 0 1 1.5 12H12Z M12 22.5A10.5 10.5 0 0 1 22.5 12H12Z" fill="#FAFAFA"/></svg><b>Мой пульс</b><span>Бесконечный поток, который подстраивается под то, что вы слушаете, — включил и забыл.</span></div>
+      <div class="feat"><svg width="34" height="34" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18v2.5H3zM3 10.75h12v2.5H3zM3 16.5h15v2.5H3z" fill="#FAFAFA"/></svg><b>Живой текст</b><span>Строки песни идут в такт музыке: текущая — крупно, прошедшие и следующие — тише.</span></div>
+      <div class="feat"><svg width="34" height="34" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18.5V5l11-2v13.5a3 3 0 1 1-2-2.83V7.4l-7 1.27v9.83a3 3 0 1 1-2-2.83z" fill="#FAFAFA"/></svg><b>Форматы без потерь</b><span>FLAC, APE, WavPack и WAV с вашего компьютера — без сторонних кодеков.</span></div>
+      <div class="feat"><svg width="34" height="34" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 7a3 3 0 1 1 0 6 3 3 0 0 1 0-6z" fill="#FAFAFA" fill-rule="evenodd"/></svg><b>Диски и WAV для CD</b><span>Запись аудио-CD и перевод музыки в WAV для дисков: 16 бит, 44,1 кГц, стерео, с проверкой каждого файла.</span></div>
+      <div class="feat"><svg width="34" height="34" viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 3a4 4 0 1 1 0 8 4 4 0 0 1 0-8zM1.5 21c.6-4.4 3.4-7 7-7s6.4 2.6 7 7zM16.5 4.2a3.6 3.6 0 0 1 0 6.6M18 13.6c2.6.8 4 3.2 4.5 7.4h-4" fill="#FAFAFA"/></svg><b>Статус у друзей</b><span>Что вы слушаете, видно в Discord и Telegram — с кнопкой, по которой друзья скачают «Пульс».</span></div>
+      <div class="feat"><svg width="34" height="34" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9h-3a6 6 0 1 1-6-6V3zM13.5 2v7.5H21z" fill="#FAFAFA"/></svg><b>Тихие обновления</b><span>Новая версия скачивается в фоне, а ставится одной кнопкой — без нового установщика.</span></div>
     </div>
   </div>
 </section>
@@ -241,7 +210,7 @@ footer a { text-decoration: none; }
     <h2>Установка на Mac</h2>
     <div class="help">
       <div><b>Какой у меня Mac?</b><p>Меню Apple в левом верхнем углу → «Об этом Mac». Написано «Чип Apple M…» — берите Apple Silicon, «Процессор Intel» — версию для Intel.</p></div>
-      <div><b>Первый запуск</b><p>Распакуйте и перетащите Pulse в «Программы». macOS спросит, открывать ли программу из интернета: «Системные настройки → Конфиденциальность и безопасность → Всё равно открыть». Дальше «Пульс» обновляется сам.</p></div>
+      <div><b>Первый запуск</b><p>Откройте скачанный файл и перетащите Pulse в папку «Программы». macOS спросит, открывать ли программу из интернета: «Системные настройки → Конфиденциальность и безопасность → Всё равно открыть». Дальше «Пульс» обновляется сам.</p></div>
     </div>
   </div>
 </section>
@@ -249,7 +218,7 @@ footer a { text-decoration: none; }
 
 <footer>
   <div class="in">
-    <svg class="mk" width="22" height="22" viewBox="23 23 100 100" aria-hidden="true"><path d="M71.5 23C71.5 49.7858 49.7858 71.5 23 71.5V74.5H71.5V123H74.5C74.5 96.2142 96.2142 74.5 123 74.5V71.5H74.5V23H71.5Z" fill="#8A8A8A"/></svg>
+    <svg class="mk" width="22" height="22" viewBox="23 23 100 100" aria-hidden="true"><path d="M71.5 23C71.5 49.7858 49.7858 71.5 23 71.5V74.5H71.5V123H74.5C74.5 96.2142 96.2142 74.5 123 74.5V71.5H74.5V23H71.5Z" fill="#737373"/></svg>
     <span>Пульс · альфа-версия. Неофициальная программа, не связана с Яндексом.</span>
     <div class="grow"></div>
     <a href="https://github.com/oqelon/pulsmusic.develop/releases" rel="noopener">Все версии на GitHub</a>
@@ -280,16 +249,20 @@ footer a { text-decoration: none; }
   const lines = (body) => String(body || '').split(/\r?\n/).map((s) => s.replace(/^\s*[•\-*]\s*/, '').trim()).filter((s) => s && !/^#/.test(s) && s.length < 220);
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   (async () => {
-    let d = null; const k = 'pulse.pc.latest';
+    let d = null; const k = 'pulse.pc.rel2';
     try { const c = JSON.parse(localStorage.getItem(k) || 'null'); if (c && Date.now() - c.t < 10 * 60e3) d = c.v; } catch {}
-    if (!d) { try { const r = await fetch('https://api.github.com/repos/' + REPO + '/releases/latest', { headers: { Accept: 'application/vnd.github+json' } }); if (r.ok) { d = await r.json(); try { localStorage.setItem(k, JSON.stringify({ t: Date.now(), v: d })); } catch {} } } catch {} }
+    // последняя версия — самый новый обычный выпуск с установщиком новой версии. Не /releases/latest: «последним» на GitHub
+    // помечен старый выпуск 0.38.0, через него обновляются старые программы
+    if (!d) { try { const r = await fetch('https://api.github.com/repos/' + REPO + '/releases?per_page=30', { headers: { Accept: 'application/vnd.github+json' } }); if (r.ok) { const all = await r.json();
+      d = all.find((x) => !x.draft && !x.prerelease && (x.assets || []).some((a) => a.name === 'Pulse-Windows-Setup.exe')) || null;
+      if (d) try { localStorage.setItem(k, JSON.stringify({ t: Date.now(), v: d })); } catch {} } } catch {} }
     if (!d) { if ($('ver')) $('ver').remove(); return; }
     const v = String(d.tag_name || '').replace(/^v/, '');
     if ($('ver')) $('ver').textContent = v;
     if (d.published_at && $('date')) $('date').textContent = ' · ' + new Date(d.published_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
     const A = d.assets || [];
-    const set = (key, re) => { const a = A.find((x) => re.test(x.name)); if (a) { $('m-' + key).textContent = mb(a.size) + ' · ' + a.name; $('b-' + key).href = a.browser_download_url; if ($('b-hero').dataset.k === key) $('b-hero').href = a.browser_download_url; } };
-    set('win', /Setup\.exe$/i); set('arm', /^Pulse-Mac-Apple-M\.zip$/); set('intel', /^Pulse-Mac-Intel\.zip$/);
+    const set = (key, re) => { const a = A.find((x) => re.test(x.name)); if (a) { $('m-' + key).textContent = mb(a.size) + ' · ' + a.name; $('b-' + key).href = a.browser_download_url; if ($('b-hero').dataset.k === key) $('b-hero').href = a.browser_download_url; } return !!a; };
+    set('win', /^Pulse-Windows-Setup\.exe$/); set('arm', /^Pulse-Mac-Apple-M\.dmg$/) || set('arm', /^Pulse-Mac-Apple-M\.zip$/); set('intel', /^Pulse-Mac-Intel\.dmg$/) || set('intel', /^Pulse-Mac-Intel\.zip$/);
   })();
 })();
 </script>
