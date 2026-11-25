@@ -165,6 +165,36 @@
       'Нажмите «Получить токен» — откроется окно входа в Яндекс, и программа сама заберёт токен';
   }
 
+  // «Без потерь»: запасной путь Яндекса (MP3, подпись «Высокое») годится, только если без потерь честно не вышло.
+  // yandex.js при любой ошибке запроса get-file-info молча берёт запасной путь — один сбой сети на смене трека
+  // превращал FLAC в MP3 до конца трека. Здесь (yandex.js не меняется): причину сбоя запоминаем из его же журнала,
+  // даём два повтора, перед ними — заново спрашиваем у Яндекса про Плюс (если он когда-то ответил «нет» по ошибке).
+  var gfiWhy = {}, plusAt = 0;
+  var cl0 = console.log.bind(console);
+  console.log = function (a, id, arrow, msg) { try { if (a === '[ym] get-file-info') gfiWhy[String(id)] = String(msg || 'без причины'); } catch (x) {} return cl0.apply(console, arguments); };
+  function streamQ(args) {
+    var token = args[0], id = String(args[1] || '').split(':')[0], want = !args[2] || args[2] === 'lossless';
+    var one = function () { delete gfiWhy[id]; return ya.stream.apply(ya, args); };
+    var fell = function (v) { return !!(want && token && v && !v.lossless && !v.preview && v.quality === 'hq'); };
+    return one().then(function (v) {
+      if (!fell(v)) return v;
+      var n = 0;
+      var again = function (v0) {
+        if (n >= 2) return v0;
+        var d = [400, 1500][n++];
+        var prep = (gfiWhy[id] || Date.now() - plusAt < 300000) ? Promise.resolve() : (plusAt = Date.now(), Promise.resolve().then(function () { return ya.account(token); }).catch(function () {}));
+        return prep.then(function () { return new Promise(function (r) { setTimeout(r, d); }); }).then(one).then(function (v1) { return fell(v1) ? again(v1) : v1; });
+      };
+      return again(v).then(function (r) {
+        if (fell(r)) {
+          r.why = gfiWhy[id] || 'Яндекс не подтвердил Плюс для аккаунта';
+          enote('quality', 'трек ' + id + ': без потерь не вышло, играет запасной вариант (' + (r.codec || '?') + ' ' + (r.bitrate || '?') + ' кбит/с). Причина: ' + r.why);
+        }
+        return r;
+      });
+    });
+  }
+
   var P = {};
   // как ym:<метод> в main.js: { ok, v, tokenProblem } или { ok: false, error }
   ['account', 'search', 'chart', 'artist', 'artistInfo', 'album', 'wave', 'waveFeedback', 'stream', 'lyrics', 'landing', 'playlist', 'likes', 'tracksById', 'likeSet'].forEach(function (m) {
@@ -177,7 +207,7 @@
           args[0] = '';
         }
       }
-      return Promise.resolve().then(function () { return ya[m].apply(ya, args); })
+      return Promise.resolve().then(function () { return m === 'stream' ? streamQ(args) : ya[m].apply(ya, args); })
         .then(function (v) { return { ok: true, v: v, tokenProblem: ya.tokenProblem() }; })
         .catch(function (e) { console.log('[ym]', m, '→', e && e.message); return { ok: false, error: String((e && e.message) || e) }; });
     };

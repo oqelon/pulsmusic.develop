@@ -14,6 +14,9 @@ const J = (o) => new Response(JSON.stringify({ result: o }), { status: 200 });
 global.__TAURI__ = { core: { invoke: async (c, a, o) => { calls.push(['invoke', c, a, o]); return c === 'ya_add' ? 'pulseya://s/abc' : c === 'app_version' ? { version: '0.38.0 (Tauri, тест №1)', engine: 'tauri' } : c === 'cd_piece' ? new Uint8Array([1, 82, 73, 70, 70]).buffer : null; } },
   http: { fetch: async (u, o) => { calls.push(['fetch', u, (o && o.headers) || {}]);
     if (u.includes('/account/status')) return J({ account: { uid: 42, login: 'x' }, plus: { hasPlus: true } });
+    if (u.includes('/get-file-info')) { global.__gfiN = (global.__gfiN || 0) + 1; if (global.__gfi === 'fail1' && global.__gfiN === 1 || global.__gfi === 'failAll') return new Response('{"error":{"message":"сбой"}}', { status: 503 }); }
+    if (u.includes('/tracks/') && u.endsWith('/download-info')) return J([{ codec: 'mp3', bitrateInKbps: 320, downloadInfoUrl: 'https://storage.mds.yandex.net/dl' }]);
+    if (u === 'https://storage.mds.yandex.net/dl') return new Response('<host>h.yandex.net</host><path>/a/b</path><ts>1</ts><s>2</s>', { status: 200 });
     if (u.includes('/get-file-info')) return J({ downloadInfo: { urls: ['https://strm.yandex.net/a'], key: '00112233445566778899aabbccddeeff', codec: 'flac-mp4', bitrate: 0, quality: 'lossless' } });
     if (u.startsWith('https://lrclib.net')) return new Response('[]', { status: 200 });
     return new Response('{"error":{"message":"нет"}}', { status: 404 }); } } };
@@ -71,5 +74,14 @@ eval(fs.readFileSync(process.argv[2], 'utf8'));
   // звук кусками — сырыми байтами, номер задания и трека — в заголовках
   calls.length = 0; await pulse.cd.put('j1', 3, new Uint8Array([1, 2, 3, 4]).buffer, 1);
   const put = calls.find((c) => c[1] === 'cd_put'); assert.ok(put[2] instanceof Uint8Array && put[2].length === 4);
+  // сбой get-file-info: один раз — второй запрос возвращает FLAC; всегда — запасной MP3 с понятной причиной
+  global.__gfi = 'fail1'; global.__gfiN = 0; const r1 = await pulse.stream('TKN', '124', 'lossless');
+  assert.ok(r1.ok && r1.v.lossless === true && global.__gfiN === 2, 'один сбой — повтор вернул FLAC, а не MP3');
+  global.__gfi = 'failAll'; global.__gfiN = 0; const r2 = await pulse.stream('TKN', '125', 'lossless');
+  assert.ok(r2.ok && !r2.v.lossless && r2.v.quality === 'hq' && /сбой/.test(r2.v.why) && global.__gfiN === 3, 'постоянный сбой — три попытки, потом MP3 и причина: ' + JSON.stringify(r2.v));
+  assert.ok(JSON.parse(store['pulse.tauritest.errors']).some((x) => x.k === 'quality' && /125/.test(x.m) && /сбой/.test(x.m)), 'причина записана в журнал');
+  global.__gfi = 'failAll'; global.__gfiN = 0; const r3 = await pulse.stream('TKN', '126', 'nq');
+  assert.ok(r3.ok && r3.v.quality === 'nq' && !r3.v.why && global.__gfiN === 1, 'среднее качество — без повторов');
+  global.__gfi = 'ok';
   console.log('мост: все проверки пройдены (' + calls.length + ' вызовов)');
 })().catch((e) => { console.error(e); process.exit(1); });
